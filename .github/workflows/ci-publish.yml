@@ -57,3 +57,31 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  runtime-smoke:
+    if: github.event_name != 'pull_request'
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate root Compose file
+        run: docker compose config --quiet
+      - name: Start published image anonymously
+        run: docker compose up -d
+      - name: Verify health, SPA fallback, and unprivileged runtime
+        run: |
+          for attempt in {1..30}; do
+            if [ "$(curl -fsS http://127.0.0.1:8080/healthz || true)" = "ok" ]; then
+              break
+            fi
+            sleep 1
+          done
+          test "$(curl -fsS http://127.0.0.1:8080/healthz)" = "ok"
+          curl -fsS http://127.0.0.1:8080/projects/example | grep -q "<title>Floorplan</title>"
+          container_id="$(docker compose ps -q floorplan)"
+          test -n "$container_id"
+          test "$(docker inspect --format '{{.Config.User}}' "$container_id")" != "root"
+          docker compose ps
+      - name: Stop smoke stack
+        if: always()
+        run: docker compose down --remove-orphans
