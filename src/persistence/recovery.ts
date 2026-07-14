@@ -1,5 +1,6 @@
 import type { FloorplanProjectV1 } from "../domain/types";
 import { deserializeProject, serializeProject, sha256 } from "../domain/serialization";
+import { generateUuid } from "../utils/uuid";
 
 const DATABASE = "floorplan-recovery";
 const STORE = "snapshots";
@@ -37,7 +38,7 @@ function waitForTransaction(transaction: IDBTransaction): Promise<void> {
 export async function makeSnapshot(project: FloorplanProjectV1): Promise<RecoverySnapshot> {
   const projectJson = serializeProject(project);
   return {
-    id: crypto.randomUUID(),
+    id: generateUuid(),
     timestamp: new Date().toISOString(),
     schemaVersion: 1,
     checksum: await sha256(projectJson),

@@ -1,10 +1,17 @@
 # Project State
 
-Updated: 2026-07-13 23:42 CDT (America/Chicago)
+Updated: 2026-07-14 08:51 CDT (America/Chicago)
 
 ## Current objective
 
-Complete. The Floorplan MVP in `DeploymentPlan.txt` is implemented, documented, publicly published, and verified through its production release pipeline. The preserved `plan.md` matches the specification content after line-ending and trailing-blank normalization.
+Fix the plain-HTTP LAN startup failure caused by direct use of `crypto.randomUUID()` when `randomUUID` is unavailable outside a secure browser context. Add one Web Crypto-backed UUID v4 helper, migrate every application call, add focused tests, update deployment documentation, and validate the existing application without changing deployment infrastructure or project compatibility.
+
+## Active work
+
+- Source audit found nine direct calls: `src/domain/defaults.ts` (1), `src/domain/geometry.ts` (2), `src/store/projectStore.ts` (5), and `src/persistence/recovery.ts` (1).
+- The fix is constrained to UUID generation, tests, README deployment notes, and the three required running project documents.
+- `Dockerfile`, `compose.yaml`, `nginx.conf`, networking, ports, schemas, identifiers already stored in projects, and storage formats are out of scope and must remain unchanged.
+- Validation required: `npm test`, `npm run lint`, `npm run build`, and the installed Chromium Playwright project.
 
 ## Current implementation state
 

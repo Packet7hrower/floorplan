@@ -22,7 +22,7 @@ Floorplan is a backend-free desktop-browser room planner for drafting one precis
 
 ## Browser support
 
-The editing experience targets the latest two desktop releases of Chrome, Edge, Firefox, and Safari at viewport widths of 1180px or wider. Mobile editing, multiple rooms/floors, collaboration, DXF, and 3D export are outside the MVP.
+The editing experience targets the latest two desktop releases of Chrome, Edge, Firefox, and Safari at viewport widths of 1180px or wider. Plain HTTP deployment on a LAN IP is supported: Floorplan uses native `crypto.randomUUID()` in secure contexts and an RFC 4122 UUID v4 fallback backed by `crypto.getRandomValues()` where `randomUUID()` is unavailable. Mobile editing, multiple rooms/floors, collaboration, DXF, and 3D export are outside the MVP.
 
 ## Local development
 
@@ -84,7 +84,7 @@ docker compose ps
 curl http://localhost:8080/healthz
 ~~~
 
-Open http://docker-host:8080. The container runs unprivileged Nginx on port 8080, serves SPA fallback routes, applies immutable caching to static assets, and exposes /healthz.
+Open http://docker-host:8080. Plain HTTP LAN addresses are supported through the Web Crypto UUID fallback; HTTPS is not required for project creation. The container runs unprivileged Nginx on port 8080, serves SPA fallback routes, applies immutable caching to static assets, and exposes /healthz.
 
 ## Portainer
 

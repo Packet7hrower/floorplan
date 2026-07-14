@@ -1,3 +1,4 @@
+import { generateUuid } from "../utils/uuid";
 import { OPENING_END_CLEARANCE } from "./defaults";
 import type {
   Bounds,
@@ -114,7 +115,7 @@ export function createRectangleGeometry(a: Point, b: Point): Pick<FloorplanProje
   const maxX = Math.max(a.x, b.x);
   const minY = Math.min(a.y, b.y);
   const maxY = Math.max(a.y, b.y);
-  const ids = Array.from({ length: 4 }, () => crypto.randomUUID());
+  const ids = Array.from({ length: 4 }, () => generateUuid());
   const vertices = [
     { id: ids[0], x: Math.round(minX), y: Math.round(minY) },
     { id: ids[1], x: Math.round(maxX), y: Math.round(minY) },
@@ -122,7 +123,7 @@ export function createRectangleGeometry(a: Point, b: Point): Pick<FloorplanProje
     { id: ids[3], x: Math.round(minX), y: Math.round(maxY) },
   ];
   const walls = vertices.map((vertex, index) => ({
-    id: crypto.randomUUID(),
+    id: generateUuid(),
     startVertexId: vertex.id,
     endVertexId: vertices[(index + 1) % vertices.length].id,
   }));

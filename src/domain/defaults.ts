@@ -1,3 +1,4 @@
+import { generateUuid } from "../utils/uuid";
 import type { FloorplanProjectV1, FurnitureType, LengthMils } from "./types";
 
 export const MILE_PER_INCH = 1_000;
@@ -35,7 +36,7 @@ export const FURNITURE_CATALOG: Record<FurnitureType, FurnitureDefinition> = {
 export function createEmptyProject(name = "Untitled floorplan"): FloorplanProjectV1 {
   return {
     schemaVersion: 1,
-    id: crypto.randomUUID(),
+    id: generateUuid(),
     name,
     displayUnit: "ft",
     settings: {

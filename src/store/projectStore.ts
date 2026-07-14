@@ -23,6 +23,7 @@ import type {
   WallAnchor,
 } from "../domain/types";
 import { validateProject } from "../domain/validation";
+import { generateUuid } from "../utils/uuid";
 
 interface History {
   past: FloorplanProjectV1[];
@@ -180,14 +181,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       return;
     }
     if (!project.vertices.length) {
-      project.vertices.push({ id: crypto.randomUUID(), x: Math.round(point.x), y: Math.round(point.y) });
+      project.vertices.push({ id: generateUuid(), x: Math.round(point.x), y: Math.round(point.y) });
       commit(set, state, project);
       return;
     }
     const previous = project.vertices[project.vertices.length - 1];
-    const endId = closeVertexId ?? crypto.randomUUID();
+    const endId = closeVertexId ?? generateUuid();
     if (!closeVertexId) project.vertices.push({ id: endId, x: Math.round(point.x), y: Math.round(point.y) });
-    const wall = { id: crypto.randomUUID(), startVertexId: previous.id, endVertexId: endId };
+    const wall = { id: generateUuid(), startVertexId: previous.id, endVertexId: endId };
     project.walls.push(wall);
     if (project.walls.length >= 3 && closeVertexId && !isValidClosedRoom(project)) {
       set({ error: "Closing this wall would create an invalid room." });
@@ -220,7 +221,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const wallLength = Math.hypot(end.x - start.x, end.y - start.y);
     const defaults = kind === "door" ? DEFAULT_DOOR : DEFAULT_WINDOW;
     const opening: Opening = {
-      id: crypto.randomUUID(),
+      id: generateUuid(),
       wallId,
       kind,
       offsetFromStart: Math.round((wallLength - defaults.width) / 2),
@@ -244,7 +245,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
     const definition = FURNITURE_CATALOG[type];
     const item: FurnitureInstance = {
-      id: crypto.randomUUID(),
+      id: generateUuid(),
       catalogType: type,
       x: Math.round(point.x),
       y: Math.round(point.y),
