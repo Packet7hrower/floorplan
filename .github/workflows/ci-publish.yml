@@ -24,8 +24,8 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
-      - run: npx playwright install --with-deps chromium
-      - run: npm run test:e2e:chromium
+      - run: npx playwright install --with-deps chromium firefox webkit
+      - run: npm run test:e2e
 
   publish:
     if: github.event_name != 'pull_request'
