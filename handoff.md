@@ -1,6 +1,6 @@
 # Floorplan — Technical Handoff
 
-Last updated: 2026-07-13 22:55 CDT (America/Chicago)
+Last updated: 2026-07-13 23:42 CDT (America/Chicago)
 
 ## Product state
 
@@ -45,26 +45,36 @@ The 3D scene renders a floor, wall segments split around door and window opening
 ## Build and deployment
 
 - npm run check executes lint, 39 unit/integration tests, TypeScript compilation, and the production Vite build.
-- Playwright config covers Chromium, Firefox, and WebKit; six Chromium acceptance flows currently pass.
+- Playwright config covers Chromium, Firefox, and WebKit; all seven acceptance flows pass in every engine, for 21 passing browser tests.
 - Dockerfile uses Node 22 for the build and nginxinc/nginx-unprivileged on port 8080 for runtime.
 - nginx.conf supplies SPA fallback, immutable static caching, security headers, and /healthz.
 - compose.yaml pulls ghcr.io/packet7hrower/floorplan:latest with port 8080:8080, unless-stopped restart behavior, and a health check.
-- .github/workflows/ci-publish.yml tests before publishing public linux/amd64 and linux/arm64 images for main and version tags.
+- .github/workflows/ci-publish.yml runs lint, unit/integration tests, production build, and the complete three-engine Playwright suite before publishing public linux/amd64 and linux/arm64 images for main and version tags.
+- After publication, the runtime-smoke job validates the root Compose file, starts the public image anonymously, and proves `/healthz`, SPA fallback, non-root execution, and clean teardown.
 - README.md contains real rendered screenshots, local controls, compatibility, Docker, Portainer, publishing, and license instructions.
 
 ## Validation evidence
 
 - npm run check: passing.
 - Vitest: 39 passing tests, including a 50-wall, 50-opening, 100-furniture acceptance-scale project rendered in approximately 158 ms on this workstation.
-- Playwright Chromium: 6 of 6 flows passing, including corrupted-newest recovery fallback and real SVG/PDF/PNG downloads.
+- Playwright: 21 of 21 flows passing across Chromium, Firefox, and WebKit, including corrupted-newest recovery fallback and real SVG/PDF/PNG downloads.
+- Accessibility: axe-core WCAG A/AA audits of first-run and populated editor states report no critical or serious violations in all three browser engines. The audit identified and drove fixes for invalid furniture-catalog ARIA grouping and opacity-reduced disabled-control contrast.
 - npm audit: zero known vulnerabilities after upgrading jsPDF to 4.2.1 or newer.
 - Visual QA completed against docs/screenshots/editor.png and docs/screenshots/3d-view.png.
-- Docker runtime validation remains unavailable locally because this workstation does not have a Docker CLI; GitHub Actions is the deployment build authority.
+- Final GitHub Actions release run 29306329914 passed `test`, `publish`, and `runtime-smoke` on source commit `e55129f84244c53a532822e22dc7ddbe98cf4570`.
+- Public anonymous OCI index: `ghcr.io/packet7hrower/floorplan:latest`, digest `sha256:e3286f7e7c2fa61fc897698fef80ca56f88cb1bdfd2c56bdc12dbfcc1b39d51d`, with verified linux/amd64 and linux/arm64 manifests.
 
-## Operational next actions
+## Release endpoints
 
-1. Initialize and publish the public Packet7hrower/floorplan GitHub repository.
-2. Observe the initial GitHub Actions run through multi-architecture image publication.
-3. Confirm the package is public, anonymous GHCR pull metadata is visible, and the documented URL is correct.
-4. If a Docker-capable host is available, run Compose, probe /healthz and SPA fallback, then perform the documented Portainer Git Repository deployment.
+- Repository: `https://github.com/Packet7hrower/floorplan`
+- Final workflow run: `https://github.com/Packet7hrower/floorplan/actions/runs/29306329914`
+- Image: `ghcr.io/packet7hrower/floorplan:latest`
+- Portainer contract: Git Repository deployment from the repository URL, branch `main`, root `compose.yaml`, then browse to `http://<docker-host>:8080`.
 
+## Home Lab deployment posture
+
+The application was not left running persistently in the Home Lab. Inventory found remembered VM124 `deepwake-docker-01` stopped, while the current Portainer VM at `192.168.30.183` already serves Managed Services Pricing on host port 8080. Starting the stopped VM or replacing/remapping that live service would be an environment decision outside the implementation plan's target-neutral Portainer contract. The published root Compose stack is nevertheless runtime-proven from an anonymous pull in GitHub Actions; a future Home Lab rollout only needs an approved Docker host and available host port.
+
+## 2026-07-13 23:42 CDT completion record
+
+The complete DeploymentPlan.txt scope is implemented and release-verified. There are no remaining required engineering actions. GitHub's Node 20 deprecation annotations apply to third-party action runtimes that GitHub currently forces onto Node 24; they are nonblocking and did not affect any test, image, or runtime result.
