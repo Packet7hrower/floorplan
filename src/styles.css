@@ -57,7 +57,8 @@ a:focus-visible {
 }
 
 button:disabled {
-  opacity: 0.45;
+  color: var(--secondary);
+  opacity: 1;
   cursor: default;
   pointer-events: none;
 }
