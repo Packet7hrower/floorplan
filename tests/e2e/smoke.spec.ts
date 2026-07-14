@@ -1,4 +1,27 @@
 import { expect, test, type Page } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
+
+async function expectNoSeriousAccessibilityViolations(page: Page) {
+  const { violations } = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  const seriousViolations = violations.filter(
+    ({ impact }) => impact === "critical" || impact === "serious",
+  );
+  expect(
+    seriousViolations,
+    JSON.stringify(
+      seriousViolations.map(({ id, impact, help, nodes }) => ({
+        id,
+        impact,
+        help,
+        targets: nodes.map(({ target }) => target),
+      })),
+      null,
+      2,
+    ),
+  ).toEqual([]);
+}
 
 async function loadSample(page: Page) {
   await page.getByRole("button", { name: "Load sample room" }).click();
@@ -20,6 +43,12 @@ async function drawRectangle(page: Page) {
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Draw walls to create a room" })).toBeVisible();
+});
+
+test("first-run and populated editor have no serious accessibility violations", async ({ page }) => {
+  await expectNoSeriousAccessibilityViolations(page);
+  await loadSample(page);
+  await expectNoSeriousAccessibilityViolations(page);
 });
 
 test("first-run rectangle, navigation, dimensions, and history", async ({ page }) => {

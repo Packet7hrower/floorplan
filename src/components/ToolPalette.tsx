@@ -31,7 +31,7 @@ export function ToolPalette({ roomReady }: ToolPaletteProps) {
         ))}
       </nav>
       <div className="panel-section-heading"><Armchair size={16} /><span>Furniture</span></div>
-      <div className="catalog" role="list" aria-label="Furniture catalog">
+      <div className="catalog" role="group" aria-label="Furniture catalog">
         {(Object.entries(FURNITURE_CATALOG) as Array<[FurnitureType, (typeof FURNITURE_CATALOG)[FurnitureType]]>).map(([type, definition]) => (
           <button type="button" key={type} disabled={!roomReady} className={"catalog-item " + (tool === "furniture" && selectedFurnitureType === type ? "active" : "")} onClick={() => setSelectedFurnitureType(type)}>
             <Rows3 size={14} /><span>{definition.label}</span>
