@@ -17,6 +17,7 @@ export interface SnapOptions {
   thresholdScreenPx: number;
   screenPixelsPerMil: number;
   origin?: Point;
+  kinds?: Partial<Record<SnapKind, boolean>>;
 }
 
 const PRIORITY: Record<SnapKind, number> = {
@@ -40,12 +41,14 @@ export function collectSnapCandidates(project: FloorplanProjectV1, point: Point,
   const threshold = options.thresholdScreenPx / Math.max(options.screenPixelsPerMil, 0.000001);
   const origin = options.origin;
   if (options.shiftKey && origin && (!options.enabled || options.altKey)) {
+    if (options.kinds?.angle === false) return [];
     const result = constrained45(point, origin);
     return [{ point: result, kind: "angle", label: "45° constraint", distance: distance(point, result) }];
   }
   if (!options.enabled || options.altKey) return [];
   const candidates: SnapCandidate[] = [];
   const add = (candidatePoint: Point, kind: SnapKind, label: string) => {
+    if (options.kinds?.[kind] === false) return;
     const candidateDistance = distance(point, candidatePoint);
     if (candidateDistance <= threshold) candidates.push({ point: candidatePoint, kind, label, distance: candidateDistance });
   };

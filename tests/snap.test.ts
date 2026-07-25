@@ -30,4 +30,14 @@ describe("snapping", () => {
     const candidates = collectSnapCandidates(project, { x: 10_000, y: 7_000 }, { ...base, altKey: true, shiftKey: true, origin: { x: 0, y: 0 } });
     expect(candidates.map((candidate) => candidate.kind)).toEqual(["angle"]);
   });
+
+  it("respects local snap-kind preferences without changing project settings", () => {
+    const project = createSampleProject();
+    const result = snapPoint(project, { x: 100, y: 100 }, {
+      ...base,
+      kinds: { endpoint: false, closure: false, center: false, edge: false, alignment: false, angle: false, grid: false },
+    });
+    expect(result.candidate).toBeNull();
+    expect(project.settings.snappingEnabled).toBe(true);
+  });
 });

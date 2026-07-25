@@ -5,10 +5,12 @@ import { chooseSnapshotIdsToPrune, makeSnapshot, type RecoverySnapshot } from ".
 
 describe("recovery snapshots", () => {
   it("attaches version, timestamp, and checksum metadata", async () => {
-    const snapshot = await makeSnapshot(createSampleProject());
+    const snapshot = await makeSnapshot(createSampleProject(), "Before furniture", "named");
     expect(snapshot.schemaVersion).toBe(1);
     expect(Number.isNaN(Date.parse(snapshot.timestamp))).toBe(false);
     expect(snapshot.checksum).toBe(await sha256(snapshot.projectJson));
+    expect(snapshot.label).toBe("Before furniture");
+    expect(snapshot.kind).toBe("named");
   });
 
   it("keeps the newest three snapshots and prunes older snapshots only after ordering", () => {

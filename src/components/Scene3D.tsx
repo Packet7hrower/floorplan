@@ -1,17 +1,20 @@
 import { ContactShadows, OrbitControls } from "@react-three/drei";
-import { Canvas } from "@react-three/fiber";
-import { RotateCcw } from "lucide-react";
-import { useMemo, useRef } from "react";
+import { Canvas, useThree } from "@react-three/fiber";
+import { Box, RotateCcw } from "lucide-react";
+import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { DEFAULT_WINDOW, FURNITURE_CATALOG } from "../domain/defaults";
-import { orderedRoomVertices, projectBounds, wallLength, wallVertices } from "../domain/geometry";
-import type { FloorplanProjectV1, FurnitureInstance, Opening, Wall } from "../domain/types";
+import { openingWorldPosition, orderedRoomVertices, projectBounds, wallLength, wallVertices } from "../domain/geometry";
+import { formatMeasurement } from "../domain/measurements";
+import type { FloorplanProjectV1, FurnitureInstance, Opening, Selection, Wall } from "../domain/types";
 import { useProjectStore } from "../store/projectStore";
+import { useUiStore } from "../store/uiStore";
 
 const SCALE = 1 / 1_000;
 
-function WallBox({ project, wall, from, to, bottom, top }: { project: FloorplanProjectV1; wall: Wall; from: number; to: number; bottom: number; top: number }) {
+function WallBox({ project, wall, from, to, bottom, top, selected }: { project: FloorplanProjectV1; wall: Wall; from: number; to: number; bottom: number; top: number; selected: boolean }) {
+  const wallOpacity = useUiStore((state) => state.wallOpacity);
   const [start, end] = wallVertices(project, wall);
   const total = wallLength(project, wall);
   const direction = { x: (end.x - start.x) / total, y: (end.y - start.y) / total };
@@ -22,27 +25,29 @@ function WallBox({ project, wall, from, to, bottom, top }: { project: FloorplanP
   return (
     <mesh position={[x, ((bottom + top) / 2) * SCALE, z]} rotation={[0, angle, 0]} castShadow receiveShadow>
       <boxGeometry args={[(to - from) * SCALE, (top - bottom) * SCALE, project.settings.wallThickness * SCALE]} />
-      <meshStandardMaterial color="#f4f3ef" roughness={0.86} metalness={0} />
+      <meshStandardMaterial color={selected ? "#002fa7" : "#f4f3ef"} roughness={0.86} metalness={0} transparent={wallOpacity < 1} opacity={wallOpacity} depthWrite={wallOpacity > 0.45} />
     </mesh>
   );
 }
 
 function WallModel({ project, wall }: { project: FloorplanProjectV1; wall: Wall }) {
+  const selected = useProjectStore((state) => state.selection?.kind === "wall" && state.selection.id === wall.id);
+  const setSelection = useProjectStore((state) => state.setSelection);
   const length = wallLength(project, wall);
   const height = project.settings.wallHeight;
   const openings = project.openings.filter((opening) => opening.wallId === wall.id).sort((a, b) => a.offsetFromStart - b.offsetFromStart);
   const pieces: React.ReactNode[] = [];
   let cursor = 0;
   openings.forEach((opening) => {
-    if (opening.offsetFromStart > cursor) pieces.push(<WallBox key={opening.id + "-before"} project={project} wall={wall} from={cursor} to={opening.offsetFromStart} bottom={0} top={height} />);
+    if (opening.offsetFromStart > cursor) pieces.push(<WallBox key={opening.id + "-before"} project={project} wall={wall} from={cursor} to={opening.offsetFromStart} bottom={0} top={height} selected={selected} />);
     const sill = opening.kind === "window" ? DEFAULT_WINDOW.sillHeight : 0;
-    if (sill > 0) pieces.push(<WallBox key={opening.id + "-sill"} project={project} wall={wall} from={opening.offsetFromStart} to={opening.offsetFromStart + opening.width} bottom={0} top={sill} />);
+    if (sill > 0) pieces.push(<WallBox key={opening.id + "-sill"} project={project} wall={wall} from={opening.offsetFromStart} to={opening.offsetFromStart + opening.width} bottom={0} top={sill} selected={selected} />);
     const topStart = Math.min(height, sill + opening.height);
-    if (topStart < height) pieces.push(<WallBox key={opening.id + "-header"} project={project} wall={wall} from={opening.offsetFromStart} to={opening.offsetFromStart + opening.width} bottom={topStart} top={height} />);
+    if (topStart < height) pieces.push(<WallBox key={opening.id + "-header"} project={project} wall={wall} from={opening.offsetFromStart} to={opening.offsetFromStart + opening.width} bottom={topStart} top={height} selected={selected} />);
     cursor = opening.offsetFromStart + opening.width;
   });
-  if (cursor < length) pieces.push(<WallBox key="after" project={project} wall={wall} from={cursor} to={length} bottom={0} top={height} />);
-  return <>{pieces}</>;
+  if (cursor < length) pieces.push(<WallBox key="after" project={project} wall={wall} from={cursor} to={length} bottom={0} top={height} selected={selected} />);
+  return <group onClick={(event) => { event.stopPropagation(); setSelection({ kind: "wall", id: wall.id }); }}>{pieces}</group>;
 }
 
 function OpeningModel({ project, opening }: { project: FloorplanProjectV1; opening: Opening }) {
@@ -159,14 +164,122 @@ function RoomScene({ project }: { project: FloorplanProjectV1 }) {
   );
 }
 
+function selectionTarget(project: FloorplanProjectV1, selection: Selection): [number, number, number] | null {
+  if (!selection) return null;
+  if (selection.kind === "furniture") {
+    const item = project.furniture.find((candidate) => candidate.id === selection.id);
+    return item ? [item.x * SCALE, item.height * SCALE * 0.5, item.y * SCALE] : null;
+  }
+  if (selection.kind === "opening") {
+    const opening = project.openings.find((candidate) => candidate.id === selection.id);
+    if (!opening) return null;
+    const center = openingWorldPosition(project, opening).center;
+    const height = (opening.kind === "window" ? DEFAULT_WINDOW.sillHeight : 0) + opening.height / 2;
+    return [center.x * SCALE, height * SCALE, center.y * SCALE];
+  }
+  const wall = project.walls.find((candidate) => candidate.id === selection.id);
+  if (!wall) return null;
+  const [start, end] = wallVertices(project, wall);
+  return [((start.x + end.x) / 2) * SCALE, project.settings.wallHeight * SCALE * 0.45, ((start.y + end.y) / 2) * SCALE];
+}
+
+function SceneCamera({
+  center,
+  focus,
+  projectId,
+  span,
+  wallHeight,
+}: {
+  center: [number, number, number];
+  focus: [number, number, number] | null;
+  projectId: string;
+  span: number;
+  wallHeight: number;
+}) {
+  const camera = useThree((state) => state.camera);
+  const controls = useRef<OrbitControlsImpl>(null);
+  const cameraRequest = useUiStore((state) => state.cameraRequest);
+  const cameraPreset = useUiStore((state) => state.cameraPreset);
+  const cameraState = useUiStore((state) => state.cameraStates[projectId] ?? null);
+  const setCameraState = useUiStore((state) => state.setCameraState);
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current) return;
+    restored.current = true;
+    if (!cameraState) return;
+    camera.position.set(...cameraState.position);
+    controls.current?.target.set(...cameraState.target);
+    controls.current?.update();
+  }, [camera, cameraState]);
+  useEffect(() => {
+    if (!cameraRequest) return;
+    const target = cameraPreset === "selection" && focus ? focus : center;
+    const distance = cameraPreset === "selection" ? Math.max(80, span * 0.75) : Math.max(240, span * 1.8);
+    const position: [number, number, number] = cameraPreset === "top"
+      ? [target[0], Math.max(180, distance * 1.35), target[2] + 0.01]
+      : cameraPreset === "eye"
+        ? [target[0] + distance, Math.max(48, wallHeight * 0.55), target[2] + distance * 0.12]
+        : cameraPreset === "selection"
+          ? [target[0] + distance * 0.55, target[1] + distance * 0.38, target[2] + distance * 0.55]
+          : [center[0] + distance * 0.58, distance * 1.1, center[2] + distance * 0.7];
+    camera.position.set(...position);
+    camera.up.set(0, 1, 0);
+    camera.lookAt(...target);
+    camera.updateProjectionMatrix();
+    controls.current?.target.set(...target);
+    controls.current?.update();
+  }, [camera, cameraPreset, cameraRequest, center, focus, span, wallHeight]);
+  return (
+    <OrbitControls
+      ref={controls}
+      makeDefault
+      target={center}
+      minDistance={24}
+      maxDistance={2000}
+      onEnd={() => {
+        if (!controls.current) return;
+        setCameraState(projectId, {
+          position: camera.position.toArray() as [number, number, number],
+          target: controls.current.target.toArray() as [number, number, number],
+        });
+      }}
+    />
+  );
+}
+
+function selectionDetails(project: FloorplanProjectV1, selection: Selection): { label: string; detail: string } | null {
+  if (!selection) return null;
+  if (selection.kind === "furniture") {
+    const item = project.furniture.find((candidate) => candidate.id === selection.id);
+    return item ? {
+      label: FURNITURE_CATALOG[item.catalogType].label,
+      detail: `${formatMeasurement(item.width, project.displayUnit)} × ${formatMeasurement(item.depth, project.displayUnit)}`,
+    } : null;
+  }
+  if (selection.kind === "opening") {
+    const opening = project.openings.find((candidate) => candidate.id === selection.id);
+    return opening ? {
+      label: opening.kind === "door" ? "Door opening" : "Window opening",
+      detail: `${formatMeasurement(opening.width, project.displayUnit)} wide`,
+    } : null;
+  }
+  const wall = project.walls.find((candidate) => candidate.id === selection.id);
+  return wall ? { label: "Wall segment", detail: formatMeasurement(Math.round(wallLength(project, wall)), project.displayUnit) } : null;
+}
+
 export function Scene3D() {
   const project = useProjectStore((state) => state.project);
-  const controls = useRef<OrbitControlsImpl>(null);
+  const selection = useProjectStore((state) => state.selection);
+  const setView = useProjectStore((state) => state.setView);
+  const ui = useUiStore();
   const bounds = projectBounds(project);
   const centerX = ((bounds.minX + bounds.maxX) / 2) * SCALE;
   const centerZ = ((bounds.minY + bounds.maxY) / 2) * SCALE;
   const span = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) * SCALE;
   const cameraDistance = Math.max(240, span * 1.8);
+  const center = useMemo<[number, number, number]>(() => [centerX, project.settings.wallHeight * SCALE * 0.35, centerZ], [centerX, centerZ, project.settings.wallHeight]);
+  const focus = useMemo(() => selectionTarget(project, selection), [project, selection]);
+  const details = useMemo(() => selectionDetails(project, selection), [project, selection]);
   return (
     <div className="scene-3d">
       <Canvas
@@ -184,10 +297,16 @@ export function Scene3D() {
         <directionalLight position={[centerX - 80, 180, centerZ + 100]} intensity={2.2} color="#fffaf2" castShadow shadow-mapSize={[2048, 2048]} shadow-radius={7} />
         <RoomScene project={project} />
         <ContactShadows position={[0, 0.05, 0]} opacity={0.3} scale={Math.max(400, span * 2)} blur={2.8} far={220} />
-        <OrbitControls ref={controls} makeDefault target={[centerX, project.settings.wallHeight * SCALE * 0.35, centerZ]} minDistance={24} maxDistance={2000} />
+        <SceneCamera center={center} focus={focus} projectId={project.id} span={span} wallHeight={project.settings.wallHeight * SCALE} />
       </Canvas>
-      <div className="view-badge"><span>3D view</span><small>Selection only · geometry edits stay in 2D</small></div>
-      <button type="button" className="button secondary reset-camera" onClick={() => controls.current?.reset()}><RotateCcw size={16} />Reset camera</button>
+      <div className="view-badge"><span>3D inspection</span><small>Camera and selection · geometry edits stay in 2D</small></div>
+      {ui.show3dLabels && details && (
+        <div className="scene-selection-label">
+          <span className="eyebrow">Selected</span><strong>{details.label}</strong><small>{details.detail}</small>
+          <button type="button" className="button primary" onClick={() => setView("2d")}><Box size={15} />Edit in 2D</button>
+        </div>
+      )}
+      <button type="button" className="button secondary reset-camera" onClick={() => ui.requestCameraPreset("isometric")}><RotateCcw size={16} />Reset camera</button>
     </div>
   );
 }

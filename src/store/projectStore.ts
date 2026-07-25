@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { DEFAULT_DOOR, DEFAULT_WINDOW, FURNITURE_CATALOG, createEmptyProject } from "../domain/defaults";
+import { DEFAULT_DOOR, DEFAULT_WINDOW, FURNITURE_CATALOG, OPENING_END_CLEARANCE, createEmptyProject } from "../domain/defaults";
 import {
   createRectangleGeometry,
   furnitureCollision,
@@ -7,6 +7,7 @@ import {
   projectBounds,
   resizeWallVertices,
   validateOpeningPlacement,
+  wallLength,
   wallVertices,
 } from "../domain/geometry";
 import { createSampleProject } from "../domain/sample";
@@ -41,6 +42,13 @@ interface ProjectState {
   zoom: number;
   pan: Point;
   dirty: boolean;
+  recoveryState: "idle" | "saving" | "saved" | "error";
+  lastRecoveryAt: string | null;
+  lastDownloadedAt: string | null;
+  lastFileSaveKind: "file" | "download" | null;
+  furnitureClipboard: FurnitureInstance | null;
+  lastMutationKey: string | null;
+  lastMutationAt: number;
   notice: string | null;
   error: string | null;
   setTool: (tool: Tool) => void;
@@ -51,6 +59,9 @@ interface ProjectState {
   setViewport: (zoom: number, pan: Point) => void;
   setNotice: (notice: string | null) => void;
   setError: (error: string | null) => void;
+  markRecoverySaving: () => void;
+  markRecoverySaved: (timestamp?: string) => void;
+  markRecoveryFailed: () => void;
   newProject: () => void;
   loadProject: (project: FloorplanProjectV1) => void;
   loadSample: () => void;
@@ -66,9 +77,17 @@ interface ProjectState {
   updateOpening: (id: string, patch: Partial<Opening>) => void;
   updateFurniture: (id: string, patch: Partial<FurnitureInstance>) => void;
   moveFurnitureClamped: (id: string, target: Point) => void;
+  moveVertexClamped: (id: string, target: Point) => void;
+  moveOpeningClamped: (id: string, offsetFromStart: LengthMils, historyKey?: string) => void;
+  nudgeSelection: (x: LengthMils, y: LengthMils) => void;
+  copySelectedFurniture: () => void;
+  pasteFurniture: () => void;
+  duplicateSelectedFurniture: () => void;
+  rotateSelectedFurniture90: () => void;
   deleteSelection: () => void;
   undo: () => void;
   redo: () => void;
+  markDownloaded: (kind: "file" | "download") => void;
   markSaved: () => void;
 }
 
@@ -80,11 +99,22 @@ function stamp(project: FloorplanProjectV1): FloorplanProjectV1 {
   return { ...project, updatedAt: new Date().toISOString() };
 }
 
-function commit(set: (value: Partial<ProjectState>) => void, state: ProjectState, next: FloorplanProjectV1, notice?: string): void {
+function commit(
+  set: (value: Partial<ProjectState>) => void,
+  state: ProjectState,
+  next: FloorplanProjectV1,
+  notice?: string,
+  historyKey?: string,
+): void {
+  const now = Date.now();
+  const coalesce = Boolean(historyKey && state.lastMutationKey === historyKey && now - state.lastMutationAt < 650);
   set({
     project: stamp(next),
-    history: { past: [...state.history.past, clone(state.project)].slice(-100), future: [] },
+    history: { past: coalesce ? state.history.past : [...state.history.past, clone(state.project)].slice(-100), future: [] },
     dirty: true,
+    recoveryState: "idle",
+    lastMutationKey: historyKey ?? null,
+    lastMutationAt: historyKey ? now : 0,
     notice: notice ?? null,
     error: null,
   });
@@ -114,6 +144,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   zoom: 100,
   pan: { x: 0, y: 0 },
   dirty: false,
+  recoveryState: "idle",
+  lastRecoveryAt: null,
+  lastDownloadedAt: null,
+  lastFileSaveKind: null,
+  furnitureClipboard: null,
+  lastMutationKey: null,
+  lastMutationAt: 0,
   notice: null,
   error: null,
   setTool: (tool) => set({ tool, error: null }),
@@ -124,6 +161,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setViewport: (zoom, pan) => set({ zoom: Math.min(800, Math.max(10, zoom)), pan }),
   setNotice: (notice) => set({ notice }),
   setError: (error) => set({ error }),
+  markRecoverySaving: () => set({ recoveryState: "saving" }),
+  markRecoverySaved: (timestamp = new Date().toISOString()) => set({ recoveryState: "saved", lastRecoveryAt: timestamp }),
+  markRecoveryFailed: () => set({ recoveryState: "error" }),
   newProject: () => set({
     project: createEmptyProject(),
     history: { past: [], future: [] },
@@ -131,6 +171,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     tool: "select",
     view: "2d",
     dirty: false,
+    recoveryState: "idle",
+    lastRecoveryAt: null,
+    lastDownloadedAt: null,
+    lastFileSaveKind: null,
+    lastMutationKey: null,
+    lastMutationAt: 0,
     notice: "New project created.",
     error: null,
   }),
@@ -147,6 +193,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       tool: "select",
       view: "2d",
       dirty: false,
+      recoveryState: "idle",
+      lastRecoveryAt: null,
+      lastDownloadedAt: null,
+      lastFileSaveKind: null,
+      lastMutationKey: null,
+      lastMutationAt: 0,
       notice: "Project opened.",
       error: null,
       pan: { x: (bounds.minX + bounds.maxX) / 2, y: (bounds.minY + bounds.maxY) / 2 },
@@ -347,6 +399,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       best = { x: candidate.x, y: candidate.y };
     }
     if (best.x === source.x && best.y === source.y) {
+      if (target.x === source.x && target.y === source.y) return;
       set({ notice: "Furniture stopped at the nearest solid boundary." });
       return;
     }
@@ -354,6 +407,144 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const item = next.furniture.find((candidate) => candidate.id === id);
     if (item) Object.assign(item, best);
     commit(set, state, next, best.x === target.x && best.y === target.y ? undefined : "Furniture stopped at the nearest solid boundary.");
+  },
+  moveVertexClamped: (id, target) => {
+    const state = get();
+    const source = state.project.vertices.find((vertex) => vertex.id === id);
+    if (!source) return;
+    let best = { x: source.x, y: source.y };
+    for (let step = 1; step <= 40; step += 1) {
+      const ratio = step / 40;
+      const next = clone(state.project);
+      const vertex = next.vertices.find((candidate) => candidate.id === id);
+      if (!vertex) return;
+      vertex.x = Math.round(source.x + (target.x - source.x) * ratio);
+      vertex.y = Math.round(source.y + (target.y - source.y) * ratio);
+      if (mutationIsValid(next)) break;
+      best = { x: vertex.x, y: vertex.y };
+    }
+    if (best.x === source.x && best.y === source.y) {
+      set({ error: "That vertex cannot move farther without invalidating the room or its contents." });
+      return;
+    }
+    const next = clone(state.project);
+    const vertex = next.vertices.find((candidate) => candidate.id === id);
+    if (vertex) Object.assign(vertex, best);
+    commit(set, state, next, best.x === target.x && best.y === target.y ? "Room vertex moved." : "Vertex stopped at the nearest valid position.");
+  },
+  moveOpeningClamped: (id, requestedOffset, historyKey) => {
+    const state = get();
+    const source = state.project.openings.find((opening) => opening.id === id);
+    if (!source) return;
+    const wall = state.project.walls.find((candidate) => candidate.id === source.wallId);
+    if (!wall) return;
+    const maxOffset = Math.max(OPENING_END_CLEARANCE, Math.round(wallLength(state.project, wall) - source.width - OPENING_END_CLEARANCE));
+    const target = Math.min(maxOffset, Math.max(OPENING_END_CLEARANCE, Math.round(requestedOffset)));
+    let best = source.offsetFromStart;
+    for (let step = 1; step <= 40; step += 1) {
+      const candidateOffset = Math.round(source.offsetFromStart + ((target - source.offsetFromStart) * step) / 40);
+      const next = clone(state.project);
+      const opening = next.openings.find((candidate) => candidate.id === id);
+      if (!opening) return;
+      opening.offsetFromStart = candidateOffset;
+      if (validateOpeningPlacement(next, opening, id)) break;
+      best = candidateOffset;
+    }
+    if (best === source.offsetFromStart && target !== source.offsetFromStart) {
+      set({ error: "The opening cannot move farther because it would overlap another opening." });
+      return;
+    }
+    const next = clone(state.project);
+    const opening = next.openings.find((candidate) => candidate.id === id);
+    if (opening) opening.offsetFromStart = best;
+    commit(set, state, next, best === target ? undefined : "Opening stopped at the nearest valid position.", historyKey);
+  },
+  nudgeSelection: (x, y) => {
+    const state = get();
+    if (!state.selection) return;
+    if (state.selection.kind === "furniture") {
+      const item = state.project.furniture.find((candidate) => candidate.id === state.selection?.id);
+      if (!item) return;
+      const next = clone(state.project);
+      const candidate = next.furniture.find((value) => value.id === item.id);
+      if (!candidate) return;
+      candidate.x += x;
+      candidate.y += y;
+      if (furnitureCollision(next, candidate, candidate.id)) {
+        set({ error: "The object cannot move farther because of a solid boundary." });
+        return;
+      }
+      commit(set, state, next, undefined, `nudge:furniture:${candidate.id}`);
+      return;
+    }
+    if (state.selection.kind === "opening") {
+      const opening = state.project.openings.find((candidate) => candidate.id === state.selection?.id);
+      if (opening) get().moveOpeningClamped(opening.id, opening.offsetFromStart + x + y, `nudge:opening:${opening.id}`);
+    }
+  },
+  copySelectedFurniture: () => {
+    const state = get();
+    if (state.selection?.kind !== "furniture") {
+      set({ notice: "Select furniture before copying it." });
+      return;
+    }
+    const item = state.project.furniture.find((candidate) => candidate.id === state.selection?.id);
+    if (item) set({ furnitureClipboard: clone({ ...state.project, furniture: [item] }).furniture[0], notice: `${FURNITURE_CATALOG[item.catalogType].label} copied.` });
+  },
+  pasteFurniture: () => {
+    const state = get();
+    const source = state.furnitureClipboard;
+    if (!source) {
+      set({ notice: "Copy a furniture object before pasting." });
+      return;
+    }
+    const spacing = Math.max(6_000, state.project.settings.gridSpacing);
+    const points: Point[] = [];
+    for (let attempt = 1; attempt <= 24; attempt += 1) {
+      const ring = Math.ceil(attempt / 4);
+      const direction = attempt % 4;
+      points.push({
+        x: source.x + (direction === 0 ? ring : direction === 2 ? -ring : 0) * spacing,
+        y: source.y + (direction === 1 ? ring : direction === 3 ? -ring : 0) * spacing,
+      });
+    }
+    const bounds = projectBounds(state.project);
+    const insetX = source.width / 2 + state.project.settings.wallThickness;
+    const insetY = source.depth / 2 + state.project.settings.wallThickness;
+    for (let y = bounds.minY + insetY; y <= bounds.maxY - insetY; y += spacing) {
+      for (let x = bounds.minX + insetX; x <= bounds.maxX - insetX; x += spacing) points.push({ x: Math.round(x), y: Math.round(y) });
+    }
+    points.sort((a, b) => Math.hypot(a.x - source.x, a.y - source.y) - Math.hypot(b.x - source.x, b.y - source.y));
+    for (const point of points) {
+      const item: FurnitureInstance = {
+        ...source,
+        id: generateUuid(),
+        x: point.x,
+        y: point.y,
+      };
+      if (furnitureCollision(state.project, item)) continue;
+      commit(set, state, { ...state.project, furniture: [...state.project.furniture, item] }, `${FURNITURE_CATALOG[item.catalogType].label} pasted.`);
+      set({ selection: { kind: "furniture", id: item.id } });
+      return;
+    }
+    set({ error: "No collision-free position was found near the copied object." });
+  },
+  duplicateSelectedFurniture: () => {
+    const state = get();
+    if (state.selection?.kind !== "furniture") {
+      set({ notice: "Select furniture before duplicating it." });
+      return;
+    }
+    const item = state.project.furniture.find((candidate) => candidate.id === state.selection?.id);
+    if (!item) return;
+    set({ furnitureClipboard: clone({ ...state.project, furniture: [item] }).furniture[0] });
+    get().pasteFurniture();
+  },
+  rotateSelectedFurniture90: () => {
+    const state = get();
+    if (state.selection?.kind !== "furniture") return;
+    const item = state.project.furniture.find((candidate) => candidate.id === state.selection?.id);
+    if (item) get().updateFurniture(item.id, { rotationDegrees: (item.rotationDegrees + 90) % 360 });
   },
   deleteSelection: () => {
     const state = get();
@@ -390,6 +581,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       dirty: true,
       notice: "Undid last change.",
       error: null,
+      lastMutationKey: null,
+      lastMutationAt: 0,
     });
   },
   redo: () => {
@@ -403,9 +596,22 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       dirty: true,
       notice: "Redid change.",
       error: null,
+      lastMutationKey: null,
+      lastMutationAt: 0,
     });
   },
-  markSaved: () => set({ dirty: false, notice: "Project saved." }),
+  markDownloaded: (lastFileSaveKind) => set({
+    dirty: false,
+    lastDownloadedAt: new Date().toISOString(),
+    lastFileSaveKind,
+    notice: lastFileSaveKind === "file" ? "Project saved to the selected file." : "Project downloaded.",
+  }),
+  markSaved: () => set({
+    dirty: false,
+    lastDownloadedAt: new Date().toISOString(),
+    lastFileSaveKind: "download",
+    notice: "Project downloaded.",
+  }),
 }));
 
 export function unitLabel(unit: Unit): string {

@@ -1,7 +1,7 @@
 import { FileImage, FileText, X } from "lucide-react";
 import { useState } from "react";
-import { downloadPdf, downloadPng, downloadSvg } from "../export/download";
 import { useProjectStore } from "../store/projectStore";
+import { useUiStore } from "../store/uiStore";
 
 interface ExportDialogProps {
   onClose: () => void;
@@ -10,14 +10,17 @@ interface ExportDialogProps {
 export function ExportDialog({ onClose }: ExportDialogProps) {
   const project = useProjectStore((state) => state.project);
   const setError = useProjectStore((state) => state.setError);
+  const markExported = useUiStore((state) => state.markExported);
   const [includeDimensions, setIncludeDimensions] = useState(true);
   const [working, setWorking] = useState<string | null>(null);
   const run = async (format: "svg" | "pdf" | "png") => {
     setWorking(format);
     try {
+      const { downloadPdf, downloadPng, downloadSvg } = await import("../export/download");
       if (format === "svg") downloadSvg(project, includeDimensions);
       if (format === "pdf") await downloadPdf(project, includeDimensions);
       if (format === "png") await downloadPng(project, includeDimensions);
+      markExported();
       onClose();
     } catch (error) {
       setError(error instanceof Error ? error.message : "Export failed.");
