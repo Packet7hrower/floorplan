@@ -1,6 +1,6 @@
 # Project State
 
-Updated: 2026-07-25 17:47 CDT (America/Chicago)
+Updated: 2026-07-25 18:06 CDT (America/Chicago)
 
 ## Current objective
 
@@ -25,8 +25,8 @@ The approved `UX_DEVELOPMENT_PLAN.md` software roadmap is implemented across sta
 - The Swiss drafting interface includes the shared Start/Center/End wall anchor, dimension rail, precise measurement entry, snapping, collision handling, and all specified keyboard/mouse behavior.
 - GitHub repository: `https://github.com/Packet7hrower/floorplan` (public, default branch `main`).
 - Container image: `ghcr.io/packet7hrower/floorplan:latest` (public anonymous registry access verified).
-- Final source commit: `e55129f84244c53a532822e22dc7ddbe98cf4570`.
-- Final successful release run: `https://github.com/Packet7hrower/floorplan/actions/runs/29306329914`.
+- Production application merge commit: `f5d5e7c588498d6c06b633619f275f93acb438d5`.
+- Final successful release run: `https://github.com/Packet7hrower/floorplan/actions/runs/30178469470`.
 
 ## Active files and services
 
@@ -53,11 +53,12 @@ The approved `UX_DEVELOPMENT_PLAN.md` software roadmap is implemented across sta
 
 ## Last published release evidence
 
-- Published source commit: `e55129f84244c53a532822e22dc7ddbe98cf4570`.
-- Release run `29306329914`: `test`, `publish`, and `runtime-smoke` passed before this local UX implementation.
-- Public OCI index digest: `sha256:e3286f7e7c2fa61fc897698fef80ca56f88cb1bdfd2c56bdc12dbfcc1b39d51d`.
-- UX implementation source branch: `codex/ux-roadmap`, published separately so remote `main` remains at the plain-HTTP UUID release until review or merge.
-- This source publication does not deploy the UX build or replace the current GHCR `latest` image.
+- The GitHub default/production branch is `main`; the repository has no literal `master` branch.
+- `codex/ux-roadmap` application commit `e7e6fdb5b6cb0461b386a6e4536e38d550a7a0c9` was pushed, then merged into `main` by merge commit `f5d5e7c588498d6c06b633619f275f93acb438d5`.
+- Release run `30178469470` passed `test`, `publish`, and `runtime-smoke`, including all 33 Playwright journeys and the anonymous public-image runtime gate.
+- Published multi-architecture image: `ghcr.io/packet7hrower/floorplan:latest`.
+- Public OCI index digest: `sha256:3f0da0b0b91946e8beaa759c9c4a5801762d3d6e6fac3fad4eb98d468217fe22`.
+- This deployment updates GitHub source and GHCR only; no persistent Home Lab stack, port, hostname, or running service was changed.
 
 ## Remaining required actions
 
