@@ -9,13 +9,16 @@ import {
   openingWorldPosition,
   orderedRoomVertices,
   polygonsOverlap,
+  reorientWallVertices,
+  rotatePoint,
   wallLength,
   wallVertices,
 } from "../domain/geometry";
 import { snapPoint, type SnapCandidate } from "../domain/snap";
-import type { Point, Wall } from "../domain/types";
-import { FURNITURE_CATALOG } from "../domain/defaults";
+import type { FurnitureInstance, Opening, Point, Wall } from "../domain/types";
+import { FURNITURE_CATALOG, OPENING_END_CLEARANCE } from "../domain/defaults";
 import { useProjectStore } from "../store/projectStore";
+import { useUiStore } from "../store/uiStore";
 
 const BASE_MILS_PER_PIXEL = 200;
 
@@ -50,8 +53,64 @@ function DimensionRail({ wall, midpoint, normal }: { wall: Wall; midpoint: Point
   );
 }
 
-export function PlanCanvas() {
+function OpeningDimensionRail({ opening, position }: { opening: Opening; position: Point }) {
+  const project = useProjectStore((state) => state.project);
+  const updateOpening = useProjectStore((state) => state.updateOpening);
+  const setError = useProjectStore((state) => state.setError);
+  const [value, setValue] = useState(formatMeasurement(opening.width, project.displayUnit));
+  useEffect(() => setValue(formatMeasurement(opening.width, project.displayUnit)), [opening.width, project.displayUnit]);
+  const submit = () => {
+    try {
+      updateOpening(opening.id, { width: parseMeasurement(value, project.displayUnit) });
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Opening width is invalid.");
+    }
+  };
+  return (
+    <foreignObject x={position.x - 31_000} y={position.y - 28_000} width={62_000} height={12_000} className="dimension-rail opening-rail">
+      <form onSubmit={(event) => { event.preventDefault(); submit(); }}>
+        <span aria-hidden="true" />
+        <input aria-label="Exact opening width" value={value} onChange={(event) => setValue(event.target.value)} onBlur={submit} />
+      </form>
+    </foreignObject>
+  );
+}
+
+function FurnitureDimensionRail({ item }: { item: FurnitureInstance }) {
+  const project = useProjectStore((state) => state.project);
+  const updateFurniture = useProjectStore((state) => state.updateFurniture);
+  const setError = useProjectStore((state) => state.setError);
+  const [width, setWidth] = useState(formatMeasurement(item.width, project.displayUnit));
+  const [depth, setDepth] = useState(formatMeasurement(item.depth, project.displayUnit));
+  useEffect(() => {
+    setWidth(formatMeasurement(item.width, project.displayUnit));
+    setDepth(formatMeasurement(item.depth, project.displayUnit));
+  }, [item.width, item.depth, project.displayUnit]);
+  const submit = () => {
+    try {
+      updateFurniture(item.id, {
+        width: parseMeasurement(width, project.displayUnit),
+        depth: parseMeasurement(depth, project.displayUnit),
+      });
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Furniture dimensions are invalid.");
+    }
+  };
+  return (
+    <foreignObject x={item.x - 48_000} y={item.y - item.depth / 2 - 34_000} width={96_000} height={13_000} className="dimension-rail furniture-rail">
+      <form onSubmit={(event) => { event.preventDefault(); submit(); }}>
+        <span aria-hidden="true" />
+        <input aria-label="Exact furniture width" value={width} onChange={(event) => setWidth(event.target.value)} onBlur={submit} />
+        <b aria-hidden="true">×</b>
+        <input aria-label="Exact furniture depth" value={depth} onChange={(event) => setDepth(event.target.value)} onBlur={submit} />
+      </form>
+    </foreignObject>
+  );
+}
+
+export function PlanCanvas({ onMeasuredRectangle }: { onMeasuredRectangle: () => void }) {
   const state = useProjectStore();
+  const snapPreferences = useUiStore((value) => value.snapPreferences);
   const svgRef = useRef<SVGSVGElement>(null);
   const [size, setSize] = useState({ width: 800, height: 600 });
   const [spaceHeld, setSpaceHeld] = useState(false);
@@ -60,12 +119,53 @@ export function PlanCanvas() {
   const [snap, setSnap] = useState<SnapCandidate | null>(null);
   const [panDrag, setPanDrag] = useState<{ screen: Point; pan: Point } | null>(null);
   const [furnitureDrag, setFurnitureDrag] = useState<{ id: string; point: Point } | null>(null);
-  const roomPolygon = useMemo(() => orderedRoomVertices(state.project), [state.project]);
+  const [vertexDrag, setVertexDrag] = useState<{ id: string; point: Point } | null>(null);
+  const [openingDrag, setOpeningDrag] = useState<{ id: string; offsetFromStart: number } | null>(null);
+  const [wallRotation, setWallRotation] = useState<{ id: string; orientationDegrees: number } | null>(null);
+  const [furnitureTransform, setFurnitureTransform] = useState<
+    | { id: string; mode: "rotate"; rotationDegrees: number }
+    | { id: string; mode: "resize"; width: number; depth: number }
+    | null
+  >(null);
+  const renderProject = useMemo(() => {
+    if (!furnitureDrag && !vertexDrag && !openingDrag && !furnitureTransform && !wallRotation) return state.project;
+    const project = structuredClone(state.project);
+    if (furnitureDrag) {
+      const item = project.furniture.find((candidate) => candidate.id === furnitureDrag.id);
+      if (item) Object.assign(item, furnitureDrag.point);
+    }
+    if (vertexDrag) {
+      const vertex = project.vertices.find((candidate) => candidate.id === vertexDrag.id);
+      if (vertex) Object.assign(vertex, vertexDrag.point);
+    }
+    if (openingDrag) {
+      const opening = project.openings.find((candidate) => candidate.id === openingDrag.id);
+      if (opening) opening.offsetFromStart = openingDrag.offsetFromStart;
+    }
+    if (wallRotation) {
+      const wall = project.walls.find((candidate) => candidate.id === wallRotation.id);
+      if (wall) {
+        const [start, end] = wallVertices(project, wall);
+        const [newStart, newEnd] = reorientWallVertices(start, end, wallRotation.orientationDegrees, state.wallAnchor);
+        Object.assign(start, { x: Math.round(newStart.x), y: Math.round(newStart.y) });
+        Object.assign(end, { x: Math.round(newEnd.x), y: Math.round(newEnd.y) });
+      }
+    }
+    if (furnitureTransform) {
+      const item = project.furniture.find((candidate) => candidate.id === furnitureTransform.id);
+      if (item) {
+        if (furnitureTransform.mode === "rotate") item.rotationDegrees = furnitureTransform.rotationDegrees;
+        else Object.assign(item, { width: furnitureTransform.width, depth: furnitureTransform.depth });
+      }
+    }
+    return project;
+  }, [furnitureDrag, furnitureTransform, openingDrag, state.project, state.wallAnchor, vertexDrag, wallRotation]);
+  const roomPolygon = useMemo(() => orderedRoomVertices(renderProject), [renderProject]);
   const roomCenter = useMemo(() => roomPolygon ? {
     x: roomPolygon.reduce((sum, point) => sum + point.x, 0) / roomPolygon.length,
     y: roomPolygon.reduce((sum, point) => sum + point.y, 0) / roomPolygon.length,
   } : null, [roomPolygon]);
-  const obstructed = useMemo(() => obstructedDoorIds(state.project), [state.project]);
+  const obstructed = useMemo(() => obstructedDoorIds(renderProject), [renderProject]);
   const viewWidth = (size.width * BASE_MILS_PER_PIXEL) / (state.zoom / 100);
   const viewHeight = (size.height * BASE_MILS_PER_PIXEL) / (state.zoom / 100);
   const viewBox = [state.pan.x - viewWidth / 2, state.pan.y - viewHeight / 2, viewWidth, viewHeight].join(" ");
@@ -104,6 +204,7 @@ export function PlanCanvas() {
       thresholdScreenPx: 12,
       screenPixelsPerMil: size.width / viewWidth,
       origin: state.tool === "wall" && last ? last : undefined,
+      kinds: snapPreferences,
     });
     setSnap(result.candidate);
     return result.point;
@@ -120,7 +221,52 @@ export function PlanCanvas() {
     }
     const point = snapped(toWorld(event.clientX, event.clientY), event);
     setPointerWorld(point);
-    if (furnitureDrag) setFurnitureDrag({ ...furnitureDrag, point });
+    if (furnitureDrag) {
+      setFurnitureDrag({ ...furnitureDrag, point });
+      return;
+    }
+    if (vertexDrag) {
+      setVertexDrag({ ...vertexDrag, point });
+      return;
+    }
+    if (openingDrag) {
+      const opening = state.project.openings.find((candidate) => candidate.id === openingDrag.id);
+      const wall = opening && state.project.walls.find((candidate) => candidate.id === opening.wallId);
+      if (opening && wall) {
+        const [start, end] = wallVertices(state.project, wall);
+        const length = wallLength(state.project, wall);
+        const along = ((point.x - start.x) * (end.x - start.x) + (point.y - start.y) * (end.y - start.y)) / length;
+        const max = Math.max(OPENING_END_CLEARANCE, length - opening.width - OPENING_END_CLEARANCE);
+        setOpeningDrag({ ...openingDrag, offsetFromStart: Math.round(Math.min(max, Math.max(OPENING_END_CLEARANCE, along - opening.width / 2))) });
+      }
+      return;
+    }
+    if (wallRotation) {
+      const wall = state.project.walls.find((candidate) => candidate.id === wallRotation.id);
+      if (!wall) return;
+      const [start, end] = wallVertices(state.project, wall);
+      const pivot = state.wallAnchor === "start" ? start : state.wallAnchor === "end" ? end : { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+      let orientationDegrees = (Math.atan2(point.y - pivot.y, point.x - pivot.x) * 180) / Math.PI;
+      if (state.wallAnchor === "end") orientationDegrees += 180;
+      if (event.shiftKey) orientationDegrees = Math.round(orientationDegrees / 45) * 45;
+      setWallRotation({ ...wallRotation, orientationDegrees: Math.round(orientationDegrees) });
+      return;
+    }
+    if (furnitureTransform) {
+      const item = state.project.furniture.find((candidate) => candidate.id === furnitureTransform.id);
+      if (!item) return;
+      if (furnitureTransform.mode === "rotate") {
+        const degrees = Math.round((Math.atan2(point.y - item.y, point.x - item.x) * 180) / Math.PI + 90);
+        setFurnitureTransform({ ...furnitureTransform, rotationDegrees: degrees });
+      } else {
+        const local = rotatePoint(point, { x: item.x, y: item.y }, -item.rotationDegrees);
+        setFurnitureTransform({
+          ...furnitureTransform,
+          width: Math.max(1_000, Math.round(Math.abs(local.x - item.x) * 2)),
+          depth: Math.max(1_000, Math.round(Math.abs(local.y - item.y) * 2)),
+        });
+      }
+    }
   };
 
   const pointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
@@ -154,6 +300,24 @@ export function PlanCanvas() {
       state.moveFurnitureClamped(furnitureDrag.id, furnitureDrag.point);
       setFurnitureDrag(null);
     }
+    if (vertexDrag) {
+      state.moveVertexClamped(vertexDrag.id, vertexDrag.point);
+      setVertexDrag(null);
+    }
+    if (openingDrag) {
+      state.moveOpeningClamped(openingDrag.id, openingDrag.offsetFromStart);
+      setOpeningDrag(null);
+    }
+    if (wallRotation) {
+      state.setWallOrientation(wallRotation.id, wallRotation.orientationDegrees, state.wallAnchor);
+      setWallRotation(null);
+    }
+    if (furnitureTransform) {
+      if (furnitureTransform.mode === "rotate") state.updateFurniture(furnitureTransform.id, { rotationDegrees: furnitureTransform.rotationDegrees });
+      else state.updateFurniture(furnitureTransform.id, { width: furnitureTransform.width, depth: furnitureTransform.depth });
+      setFurnitureTransform(null);
+    }
+    if (vertexDrag || openingDrag || furnitureTransform || wallRotation) svgRef.current?.releasePointerCapture(event.pointerId);
   };
 
   const canvasClick = (event: React.MouseEvent<SVGSVGElement>) => {
@@ -185,12 +349,14 @@ export function PlanCanvas() {
 
   const previewStart = state.tool === "wall" ? state.project.vertices.at(-1) : undefined;
   const grid = state.project.settings.gridSpacing;
-  const dragCandidate = furnitureDrag ? (() => {
-    const item = state.project.furniture.find((candidate) => candidate.id === furnitureDrag.id);
-    return item ? { ...item, x: furnitureDrag.point.x, y: furnitureDrag.point.y } : null;
+  const activeFurnitureId = furnitureDrag?.id ?? furnitureTransform?.id;
+  const dragCandidate = activeFurnitureId ? (() => {
+    const item = renderProject.furniture.find((candidate) => candidate.id === activeFurnitureId);
+    return item ?? null;
   })() : null;
-  const dragCollision = dragCandidate ? furnitureCollision(state.project, dragCandidate, dragCandidate.id) : null;
-  const warningFurniture = new Set(state.project.furniture.filter((item) => state.project.openings.some((opening) => obstructed.has(opening.id) && polygonsOverlap(createDoorSwingPolygon(state.project, opening), furnitureCorners(item)))).map((item) => item.id));
+  const dragCollision = dragCandidate ? furnitureCollision(renderProject, dragCandidate, dragCandidate.id) : null;
+  const warningFurniture = new Set(renderProject.furniture.filter((item) => renderProject.openings.some((opening) => obstructed.has(opening.id) && polygonsOverlap(createDoorSwingPolygon(renderProject, opening), furnitureCorners(item)))).map((item) => item.id));
+  const handleRadius = Math.max(1_600, (viewWidth / Math.max(size.width, 1)) * 5);
 
   return (
     <div className={"plan-canvas-wrap " + (spaceHeld || panDrag ? "panning" : "")}>
@@ -215,17 +381,20 @@ export function PlanCanvas() {
         <rect x={state.pan.x - viewWidth} y={state.pan.y - viewHeight} width={viewWidth * 2} height={viewHeight * 2} fill="url(#minor-grid)" className="grid-surface" />
         {roomPolygon && <polygon points={pointsAttribute(roomPolygon)} className="room-polygon" />}
         <g className="walls">
-          {state.project.walls.map((wall) => {
-            const [start, end] = wallVertices(state.project, wall);
+          {renderProject.walls.map((wall) => {
+            const [start, end] = wallVertices(renderProject, wall);
             const selected = state.selection?.kind === "wall" && state.selection.id === wall.id;
-            const length = wallLength(state.project, wall);
+            const length = wallLength(renderProject, wall);
             const middle = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+            const pivot = state.wallAnchor === "start" ? start : state.wallAnchor === "end" ? end : middle;
             let normal = { x: -((end.y - start.y) / length) * 13_000, y: ((end.x - start.x) / length) * 13_000 };
             if (roomCenter) {
               const toward = Math.hypot(middle.x + normal.x - roomCenter.x, middle.y + normal.y - roomCenter.y);
               const away = Math.hypot(middle.x - normal.x - roomCenter.x, middle.y - normal.y - roomCenter.y);
               if (toward < away) normal = { x: -normal.x, y: -normal.y };
             }
+            const rotationHandle = { x: pivot.x + normal.x * 2.4, y: pivot.y + normal.y * 2.4 };
+            const orientationDegrees = Math.round((Math.atan2(end.y - start.y, end.x - start.x) * 180) / Math.PI);
             return (
               <g key={wall.id} className={(selected ? "selected " : "") + (dragCollision === "wall" ? "blocking" : "")}>
                 <line x1={start.x} y1={start.y} x2={end.x} y2={end.y} className="wall-hit" onClick={(event) => {
@@ -239,38 +408,85 @@ export function PlanCanvas() {
                   <circle
                     cx={state.wallAnchor === "start" ? start.x : state.wallAnchor === "end" ? end.x : middle.x}
                     cy={state.wallAnchor === "start" ? start.y : state.wallAnchor === "end" ? end.y : middle.y}
-                    r={3_200}
+                    r={handleRadius}
                     className="anchor-marker"
                   />
+                  <line x1={pivot.x} y1={pivot.y} x2={rotationHandle.x} y2={rotationHandle.y} className="transform-guide" />
+                  <circle
+                    cx={rotationHandle.x}
+                    cy={rotationHandle.y}
+                    r={handleRadius}
+                    className="transform-handle rotation-handle"
+                    aria-label="Rotate wall"
+                    onPointerDown={(event) => {
+                      event.stopPropagation();
+                      svgRef.current?.setPointerCapture(event.pointerId);
+                      setWallRotation({ id: wall.id, orientationDegrees });
+                    }}
+                    onClick={(event) => event.stopPropagation()}
+                  />
                   <DimensionRail wall={wall} midpoint={middle} normal={normal} />
+                  {[start, end].map((vertex) => (
+                    <circle
+                      key={vertex.id}
+                      cx={vertex.x}
+                      cy={vertex.y}
+                      r={handleRadius}
+                      className="transform-handle vertex-handle"
+                      aria-label="Move room vertex"
+                      onPointerDown={(event) => {
+                        event.stopPropagation();
+                        svgRef.current?.setPointerCapture(event.pointerId);
+                        setVertexDrag({ id: vertex.id, point: { x: vertex.x, y: vertex.y } });
+                      }}
+                      onClick={(event) => event.stopPropagation()}
+                    />
+                  ))}
                 </>}
               </g>
             );
           })}
         </g>
         <g className="openings">
-          {state.project.openings.map((opening) => {
-            const wall = state.project.walls.find((item) => item.id === opening.wallId);
+          {renderProject.openings.map((opening) => {
+            const wall = renderProject.walls.find((item) => item.id === opening.wallId);
             if (!wall) return null;
-            const [start, end] = wallVertices(state.project, wall);
-            const length = wallLength(state.project, wall);
+            const [start, end] = wallVertices(renderProject, wall);
+            const length = wallLength(renderProject, wall);
             const p1 = { x: start.x + ((end.x - start.x) * opening.offsetFromStart) / length, y: start.y + ((end.y - start.y) * opening.offsetFromStart) / length };
             const p2 = { x: start.x + ((end.x - start.x) * (opening.offsetFromStart + opening.width)) / length, y: start.y + ((end.y - start.y) * (opening.offsetFromStart + opening.width)) / length };
             const selected = state.selection?.kind === "opening" && state.selection.id === opening.id;
-            const swing = createDoorSwingPolygon(state.project, opening);
+            const swing = createDoorSwingPolygon(renderProject, opening);
+            const openingPosition = openingWorldPosition(renderProject, opening).center;
             return (
               <g key={opening.id} className={(selected ? "selected " : "") + (obstructed.has(opening.id) ? "warning" : "")} onClick={(event) => { event.stopPropagation(); if (state.tool === "select") state.setSelection({ kind: "opening", id: opening.id }); }}>
                 <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} className="opening-cut" style={{ strokeWidth: state.project.settings.wallThickness + 2_000 }} />
                 {opening.kind === "window" ? <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} className="window-line" /> : <><polyline points={pointsAttribute(swing)} className="swing-arc" /><circle cx={opening.hinge === "right" ? p2.x : p1.x} cy={opening.hinge === "right" ? p2.y : p1.y} r={2_100} className="hinge-dot" /></>}
-                {selected && <text x={openingWorldPosition(state.project, opening).center.x} y={openingWorldPosition(state.project, opening).center.y - 8_000} className="canvas-dimension" textAnchor="middle">{formatMeasurement(opening.width, state.project.displayUnit)}</text>}
+                {selected && <>
+                  <circle
+                    cx={openingPosition.x}
+                    cy={openingPosition.y}
+                    r={handleRadius}
+                    className="transform-handle opening-handle"
+                    aria-label="Move opening along wall"
+                    onPointerDown={(event) => {
+                      event.stopPropagation();
+                      svgRef.current?.setPointerCapture(event.pointerId);
+                      setOpeningDrag({ id: opening.id, offsetFromStart: opening.offsetFromStart });
+                    }}
+                  />
+                  {!openingDrag && <OpeningDimensionRail opening={opening} position={openingPosition} />}
+                </>}
               </g>
             );
           })}
         </g>
         <g className="furniture-layer">
-          {state.project.furniture.map((item) => {
-            const corners = furnitureDrag?.id === item.id ? furnitureCorners({ ...item, x: furnitureDrag.point.x, y: furnitureDrag.point.y }) : furnitureCorners(item);
+          {renderProject.furniture.map((item) => {
+            const corners = furnitureCorners(item);
             const selected = state.selection?.kind === "furniture" && state.selection.id === item.id;
+            const rotateHandle = rotatePoint({ x: item.x, y: item.y - item.depth / 2 - 13_000 }, { x: item.x, y: item.y }, item.rotationDegrees);
+            const resizeHandle = rotatePoint({ x: item.x + item.width / 2, y: item.y + item.depth / 2 }, { x: item.x, y: item.y }, item.rotationDegrees);
             return (
               <g key={item.id} className={(selected ? "selected " : "") + (warningFurniture.has(item.id) ? "warning " : "") + (dragCollision === item.id || furnitureDrag?.id === item.id && dragCollision ? "blocking" : "")} onPointerDown={(event) => {
                 if (state.tool !== "select") return;
@@ -279,7 +495,36 @@ export function PlanCanvas() {
                 setFurnitureDrag({ id: item.id, point: { x: item.x, y: item.y } });
               }} onClick={(event) => { if (state.tool === "select") event.stopPropagation(); }}>
                 <polygon points={pointsAttribute(corners)} />
-                <text x={furnitureDrag?.id === item.id ? furnitureDrag.point.x : item.x} y={furnitureDrag?.id === item.id ? furnitureDrag.point.y : item.y} textAnchor="middle" dominantBaseline="middle">{FURNITURE_CATALOG[item.catalogType].label}</text>
+                <text x={item.x} y={item.y} textAnchor="middle" dominantBaseline="middle">{FURNITURE_CATALOG[item.catalogType].label}</text>
+                {selected && <>
+                  <line x1={item.x} y1={item.y} x2={rotateHandle.x} y2={rotateHandle.y} className="transform-guide" />
+                  <circle
+                    cx={rotateHandle.x}
+                    cy={rotateHandle.y}
+                    r={handleRadius}
+                    className="transform-handle rotation-handle"
+                    aria-label="Rotate furniture"
+                    onPointerDown={(event) => {
+                      event.stopPropagation();
+                      svgRef.current?.setPointerCapture(event.pointerId);
+                      setFurnitureTransform({ id: item.id, mode: "rotate", rotationDegrees: item.rotationDegrees });
+                    }}
+                  />
+                  <rect
+                    x={resizeHandle.x - handleRadius}
+                    y={resizeHandle.y - handleRadius}
+                    width={handleRadius * 2}
+                    height={handleRadius * 2}
+                    className="transform-handle resize-handle"
+                    aria-label="Resize furniture"
+                    onPointerDown={(event) => {
+                      event.stopPropagation();
+                      svgRef.current?.setPointerCapture(event.pointerId);
+                      setFurnitureTransform({ id: item.id, mode: "resize", width: item.width, depth: item.depth });
+                    }}
+                  />
+                  {!furnitureDrag && !furnitureTransform && <FurnitureDimensionRail item={item} />}
+                </>}
               </g>
             );
           })}
@@ -304,7 +549,8 @@ export function PlanCanvas() {
           <h1>Draw walls to create a room</h1>
           <p>Start with a rectangle or load an editable sample room with openings and furniture.</p>
           <div>
-            <button type="button" className="button primary" onClick={() => state.setTool("rectangle")}>Draw rectangle</button>
+            <button type="button" className="button primary" onClick={onMeasuredRectangle}>Create measured room</button>
+            <button type="button" className="button secondary" onClick={() => state.setTool("rectangle")}>Draw rectangle</button>
             <button type="button" className="button secondary" onClick={state.loadSample}>Load sample room</button>
           </div>
         </section>

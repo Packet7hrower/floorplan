@@ -1,6 +1,6 @@
 # Floorplan — Technical Handoff
 
-Last updated: 2026-07-13 23:42 CDT (America/Chicago)
+Last updated: 2026-07-25 CDT (America/Chicago)
 
 ## Product state
 
@@ -78,3 +78,67 @@ The application was not left running persistently in the Home Lab. Inventory fou
 ## 2026-07-13 23:42 CDT completion record
 
 The complete DeploymentPlan.txt scope is implemented and release-verified. There are no remaining required engineering actions. GitHub's Node 20 deprecation annotations apply to third-party action runtimes that GitHub currently forces onto Node 24; they are nonblocking and did not affect any test, image, or runtime result.
+
+## 2026-07-25 UX review and roadmap
+
+The implemented product, screenshots, interaction components, Zustand state, existing acceptance tests, original discovery decisions, and product constraints were reviewed without changing application code or runtime state. The Swiss drafting direction remains appropriate and should be preserved rather than restyled.
+
+The main UX risks are startup failures without an application recovery surface, ambiguous autosave-versus-download state, onboarding that ends after room creation, icon-only top actions, unexplained unavailable tools, fixed rail density, form-heavy precision editing, and a 3D mode that retains prominent 2D controls. These are product-clarity and interaction issues rather than deficiencies in the geometry model.
+
+`UX_DEVELOPMENT_PLAN.md` is now the proposed post-MVP roadmap. It sequences six releases: trust/startup clarity, guided first use, precision editing, workspace efficiency, project confidence, and 3D inspection polish. It preserves one-room scope, 2D-authoritative editing, backend-free operation, plain-HTTP LAN support, v1 compatibility, and the current Swiss design tokens.
+
+The recommended first implementation slice is an error boundary and lightweight loading shell, deferred 3D/export loading, explicit protection/download state, accessible prerequisite guidance, measured-rectangle entry, and a dismissible workflow progress rail. No tests or deployment checks were run for this documentation-only review.
+
+## 2026-07-25 16:48 CDT — UX roadmap implementation
+
+All six releases in `UX_DEVELOPMENT_PLAN.md` are implemented locally. The work preserves the one-room scope, 2D-authoritative geometry model, `schemaVersion: 1`, existing IDs and storage formats, backend-free operation, portable project files, plain-HTTP LAN support, and the established Swiss drafting design. Dockerfile, `compose.yaml`, `nginx.conf`, networking, ports, dependencies, and published runtime state were not changed.
+
+### Startup, lifecycle, and onboarding
+
+`src/main.tsx` now mounts `AppErrorBoundary` around a Suspense loading shell. `src/components/AppErrorBoundary.tsx` supplies a recoverable startup surface with reload, recovery bypass, and technical details. `src/App.tsx` defers `Scene3D`, `ExportDialog`, and project-library dialogs; this reduces the main minified entry chunk from the approximately 1.70 MB baseline to 366.93 KB while isolating the 889.85 KB 3D and 475.14 KB export chunks.
+
+`src/components/Guidance.tsx` implements a keyboard-completable measured rectangle flow, contextual active-tool instructions, the dismissible room-workflow rail, Help, shortcuts, and About/build diagnostics. `src/components/TopToolbar.tsx` distinguishes local recovery, portable download, local projects, exports, and optional secure-context direct file save. Prerequisite actions remain focusable and explain how to become available instead of disappearing behind inaccessible disabled controls.
+
+### Precision and workspace state
+
+`src/components/PlanCanvas.tsx` exposes zoom-stable vertex, opening, furniture rotation, and furniture resize handles with contextual dimension rails. `src/store/projectStore.ts` adds validated vertex/opening movement, coalesced nudge history, copy/paste/duplicate, 90-degree rotation, and collision-free paste placement. Furniture position fields and precision actions are mirrored in `src/components/PropertiesPanel.tsx`; `src/domain/snap.ts` supports independently persisted snap categories.
+
+`src/store/uiStore.ts` keeps rail widths/collapse state, workflow dismissal, furniture search/category/favorites/recents, snap settings, 3D display choices, and per-project-session camera state in a separate local preference record. These preferences never enter project JSON. The rails are pointer- and keyboard-resizable, compact widths use File/Edit/View/Help menus, the selection breadcrumb can clear context reliably, and the 3D left rail becomes scene controls rather than inactive drawing tools.
+
+### Local confidence and 3D inspection
+
+IndexedDB schema version 2 retains the rotating snapshot store and adds a local project store. `src/components/ProjectLibrary.tsx` provides thumbnail project browsing, save/open/delete, a recovery center, and named recovery snapshots. `src/persistence/recovery.ts` implements the storage operations; existing snapshots migrate in place. Import validation and diagnostics now complete before discard confirmation or replacement of the active project.
+
+`src/components/Scene3D.tsx` provides Isometric, Top, Eye level, Frame selection, room-framed reset, synchronized wall/opening/furniture selection, wall transparency, optional selected-object labels/dimensions, and direct Edit in 2D. Project geometry is not mutated from 3D. `src/domain/serialization.ts` uses SubtleCrypto when available and a browser-side SHA-256 implementation when insecure contexts restrict it, matching the existing Web Crypto UUID fallback.
+
+### Validation
+
+- `npm run check`: ESLint passed with zero warnings, all 52 Vitest tests passed, and TypeScript/Vite production build passed.
+- `npm run test:e2e`: all 33 journeys passed across Chromium, Firefox, and WebKit in 2.4 minutes.
+- The browser suite covers first-run/populated accessibility, measured and freeform room creation, precision commands, rails/catalog behavior, project protection, local projects, recovery corruption fallback, import diagnostics, 3D inspection, portable round trips, all export formats, and deliberate removal of both native `crypto.randomUUID` and `crypto.subtle`.
+- Automated accessibility scans report no critical or serious WCAG A/AA violations in the three engines.
+- Visual QA covered 1180×768, 1440×900, and 1920×1080; `docs/screenshots/editor.png` and `docs/screenshots/3d-view.png` were refreshed from the production build and inspected.
+- `docs/UX_RESEARCH_PROTOCOL.md` defines the five-participant moderated validation, measurement sheet, and success thresholds. Those real sessions require participants and remain external evidence; no human results are claimed.
+
+### Source map
+
+- Application orchestration: `src/App.tsx`, `src/main.tsx`
+- Startup and guidance: `src/components/AppErrorBoundary.tsx`, `src/components/Guidance.tsx`, `src/utils/buildInfo.ts`
+- UI preferences: `src/store/uiStore.ts`
+- Precision state/canvas: `src/store/projectStore.ts`, `src/components/PlanCanvas.tsx`, `src/components/PropertiesPanel.tsx`
+- Workspace/navigation: `src/components/TopToolbar.tsx`, `src/components/ToolPalette.tsx`, `src/styles.css`
+- Local project confidence: `src/components/ProjectLibrary.tsx`, `src/persistence/recovery.ts`, `src/export/projectFile.ts`
+- 3D inspection: `src/components/Scene3D.tsx`
+- Focused tests: `tests/projectStore.test.ts`, `tests/errorBoundary.test.ts`, `tests/recovery.test.ts`, `tests/serialization.test.ts`, `tests/snap.test.ts`, `tests/e2e/smoke.spec.ts`
+
+## 2026-07-25 16:56 CDT — GitHub source publication
+
+The complete verified UX implementation is published on the dedicated `codex/ux-roadmap` branch at `https://github.com/Packet7hrower/floorplan`. The push uses an explicit `HEAD:refs/heads/codex/ux-roadmap` refspec so remote `main` remains unchanged at the pre-UX plain-HTTP UUID release. This is source publication only: no pull request, merge, GHCR replacement, persistent deployment, Docker change, or networking change is part of this action.
+
+## 2026-07-25 17:47 CDT — Recovery fallback and safe wall reorientation
+
+`src/persistence/recovery.ts` now creates the recovery snapshot before opening IndexedDB and writes the normal version-2 IndexedDB record when possible. If IndexedDB is unavailable, blocked, or fails during the write/prune transaction, the same validated snapshot is retained in a bounded three-record `localStorage` fallback (`floorplan-recovery-fallback-snapshots`). Startup recovery merges IndexedDB and fallback records when both are readable, and uses the fallback alone if IndexedDB is unavailable. The fallback is intentionally browser-local, preserves the same schema/checksum/project JSON contract, and does not alter downloaded `.floorplan.json` files. If both IndexedDB and localStorage are blocked or out of quota, the existing visible warning still correctly directs the user to download the portable file.
+
+`src/domain/geometry.ts` adds `reorientWallVertices`, which preserves the selected segment length and fixes its Start, Center, or End anchor while setting an absolute bearing. `src/store/projectStore.ts` exposes `setWallOrientation`, applies it only to the existing two vertex objects, and then runs the existing closed-room, opening-placement, and furniture-collision checks before committing history. Consequently the wall ID, connected-wall topology, and hosted-opening IDs/offsets are retained; invalid orientations are rejected instead of removing or rebuilding the room.
+
+`src/components/PlanCanvas.tsx` renders a visible selected-wall rotation handle outside the room and previews the orientation before commit. Dragging supports 45-degree increments while Shift is held. `src/components/PropertiesPanel.tsx` adds an exact degrees field for repeatable work. The existing endpoint handles remain available for moving individual connected vertices. Focused regression coverage now verifies the anchor geometry, retention of a hosted door and a valid four-wall room, and recovery fallback when IndexedDB is undefined. `npm run check` passed with 55 Vitest tests, ESLint at zero warnings, TypeScript, and a regenerated Vite production build. No dependency, schema, Docker, network, or deployed-service change was made.

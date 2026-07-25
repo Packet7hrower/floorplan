@@ -1,21 +1,9 @@
 import { jsPDF } from "jspdf";
 import "svg2pdf.js";
 import type { FloorplanProjectV1 } from "../domain/types";
-import { sanitizeFilename, serializeProject } from "../domain/serialization";
+import { sanitizeFilename } from "../domain/serialization";
 import { createPlanSvg } from "./planSvg";
-
-function downloadBlob(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1_000);
-}
-
-export function downloadProject(project: FloorplanProjectV1): void {
-  downloadBlob(new Blob([serializeProject(project)], { type: "application/json" }), sanitizeFilename(project.name) + ".floorplan.json");
-}
+import { downloadBlob } from "./projectFile";
 
 export function downloadSvg(project: FloorplanProjectV1, includeDimensions: boolean): void {
   downloadBlob(new Blob([createPlanSvg(project, { includeDimensions })], { type: "image/svg+xml" }), sanitizeFilename(project.name) + ".svg");

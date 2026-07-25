@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSampleProject } from "../src/domain/sample";
 import { deserializeProject, sanitizeFilename, serializeProject, sha256 } from "../src/domain/serialization";
 import { ProjectValidationError, validateProject } from "../src/domain/validation";
 
 describe("project validation and serialization", () => {
+  afterEach(() => vi.unstubAllGlobals());
   it("performs a lossless validated round trip", () => {
     const project = createSampleProject();
     expect(deserializeProject(serializeProject(project))).toEqual(project);
@@ -22,9 +23,14 @@ describe("project validation and serialization", () => {
   });
 
   it("creates deterministic checksums and sanitized filenames", async () => {
-    expect(await sha256("floorplan")).toBe(await sha256("floorplan"));
+    expect(await sha256("floorplan")).toBe("e59264e6e8c354e220b6fc5092c588a6caa7a6104b8846dbe66d9311f711f675");
     expect(await sha256("floorplan")).not.toBe(await sha256("Floorplan"));
     expect(sanitizeFilename(' Casey\'s <Plan>: 01 ')).toBe("caseys-plan-01");
     expect(sanitizeFilename("***")).toBe("floorplan");
+  });
+
+  it("keeps recovery checksums available when SubtleCrypto is unavailable", async () => {
+    vi.stubGlobal("crypto", { getRandomValues: (target: Uint8Array) => target });
+    expect(await sha256("floorplan")).toBe("e59264e6e8c354e220b6fc5092c588a6caa7a6104b8846dbe66d9311f711f675");
   });
 });
