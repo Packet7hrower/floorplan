@@ -1,9 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSampleProject } from "../src/domain/sample";
 import { sha256 } from "../src/domain/serialization";
-import { chooseSnapshotIdsToPrune, makeSnapshot, type RecoverySnapshot } from "../src/persistence/recovery";
+import { chooseSnapshotIdsToPrune, listRecoverySnapshots, makeSnapshot, writeRecoverySnapshot, type RecoverySnapshot } from "../src/persistence/recovery";
 
 describe("recovery snapshots", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    localStorage.removeItem("floorplan-recovery-fallback-snapshots");
+  });
+
   it("attaches version, timestamp, and checksum metadata", async () => {
     const snapshot = await makeSnapshot(createSampleProject(), "Before furniture", "named");
     expect(snapshot.schemaVersion).toBe(1);
@@ -22,5 +27,13 @@ describe("recovery snapshots", () => {
       projectJson: "",
     })) satisfies RecoverySnapshot[];
     expect(chooseSnapshotIdsToPrune(snapshots)).toEqual(["1", "0"]);
+  });
+
+  it("falls back to localStorage when IndexedDB is blocked", async () => {
+    vi.stubGlobal("indexedDB", undefined);
+    await writeRecoverySnapshot(createSampleProject());
+    const snapshots = await listRecoverySnapshots();
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0].projectJson).toContain('"schemaVersion": 1');
   });
 });

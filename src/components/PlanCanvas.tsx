@@ -9,6 +9,7 @@ import {
   openingWorldPosition,
   orderedRoomVertices,
   polygonsOverlap,
+  reorientWallVertices,
   rotatePoint,
   wallLength,
   wallVertices,
@@ -120,13 +121,14 @@ export function PlanCanvas({ onMeasuredRectangle }: { onMeasuredRectangle: () =>
   const [furnitureDrag, setFurnitureDrag] = useState<{ id: string; point: Point } | null>(null);
   const [vertexDrag, setVertexDrag] = useState<{ id: string; point: Point } | null>(null);
   const [openingDrag, setOpeningDrag] = useState<{ id: string; offsetFromStart: number } | null>(null);
+  const [wallRotation, setWallRotation] = useState<{ id: string; orientationDegrees: number } | null>(null);
   const [furnitureTransform, setFurnitureTransform] = useState<
     | { id: string; mode: "rotate"; rotationDegrees: number }
     | { id: string; mode: "resize"; width: number; depth: number }
     | null
   >(null);
   const renderProject = useMemo(() => {
-    if (!furnitureDrag && !vertexDrag && !openingDrag && !furnitureTransform) return state.project;
+    if (!furnitureDrag && !vertexDrag && !openingDrag && !furnitureTransform && !wallRotation) return state.project;
     const project = structuredClone(state.project);
     if (furnitureDrag) {
       const item = project.furniture.find((candidate) => candidate.id === furnitureDrag.id);
@@ -140,6 +142,15 @@ export function PlanCanvas({ onMeasuredRectangle }: { onMeasuredRectangle: () =>
       const opening = project.openings.find((candidate) => candidate.id === openingDrag.id);
       if (opening) opening.offsetFromStart = openingDrag.offsetFromStart;
     }
+    if (wallRotation) {
+      const wall = project.walls.find((candidate) => candidate.id === wallRotation.id);
+      if (wall) {
+        const [start, end] = wallVertices(project, wall);
+        const [newStart, newEnd] = reorientWallVertices(start, end, wallRotation.orientationDegrees, state.wallAnchor);
+        Object.assign(start, { x: Math.round(newStart.x), y: Math.round(newStart.y) });
+        Object.assign(end, { x: Math.round(newEnd.x), y: Math.round(newEnd.y) });
+      }
+    }
     if (furnitureTransform) {
       const item = project.furniture.find((candidate) => candidate.id === furnitureTransform.id);
       if (item) {
@@ -148,7 +159,7 @@ export function PlanCanvas({ onMeasuredRectangle }: { onMeasuredRectangle: () =>
       }
     }
     return project;
-  }, [furnitureDrag, furnitureTransform, openingDrag, state.project, vertexDrag]);
+  }, [furnitureDrag, furnitureTransform, openingDrag, state.project, state.wallAnchor, vertexDrag, wallRotation]);
   const roomPolygon = useMemo(() => orderedRoomVertices(renderProject), [renderProject]);
   const roomCenter = useMemo(() => roomPolygon ? {
     x: roomPolygon.reduce((sum, point) => sum + point.x, 0) / roomPolygon.length,
@@ -230,6 +241,17 @@ export function PlanCanvas({ onMeasuredRectangle }: { onMeasuredRectangle: () =>
       }
       return;
     }
+    if (wallRotation) {
+      const wall = state.project.walls.find((candidate) => candidate.id === wallRotation.id);
+      if (!wall) return;
+      const [start, end] = wallVertices(state.project, wall);
+      const pivot = state.wallAnchor === "start" ? start : state.wallAnchor === "end" ? end : { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+      let orientationDegrees = (Math.atan2(point.y - pivot.y, point.x - pivot.x) * 180) / Math.PI;
+      if (state.wallAnchor === "end") orientationDegrees += 180;
+      if (event.shiftKey) orientationDegrees = Math.round(orientationDegrees / 45) * 45;
+      setWallRotation({ ...wallRotation, orientationDegrees: Math.round(orientationDegrees) });
+      return;
+    }
     if (furnitureTransform) {
       const item = state.project.furniture.find((candidate) => candidate.id === furnitureTransform.id);
       if (!item) return;
@@ -286,12 +308,16 @@ export function PlanCanvas({ onMeasuredRectangle }: { onMeasuredRectangle: () =>
       state.moveOpeningClamped(openingDrag.id, openingDrag.offsetFromStart);
       setOpeningDrag(null);
     }
+    if (wallRotation) {
+      state.setWallOrientation(wallRotation.id, wallRotation.orientationDegrees, state.wallAnchor);
+      setWallRotation(null);
+    }
     if (furnitureTransform) {
       if (furnitureTransform.mode === "rotate") state.updateFurniture(furnitureTransform.id, { rotationDegrees: furnitureTransform.rotationDegrees });
       else state.updateFurniture(furnitureTransform.id, { width: furnitureTransform.width, depth: furnitureTransform.depth });
       setFurnitureTransform(null);
     }
-    if (vertexDrag || openingDrag || furnitureTransform) svgRef.current?.releasePointerCapture(event.pointerId);
+    if (vertexDrag || openingDrag || furnitureTransform || wallRotation) svgRef.current?.releasePointerCapture(event.pointerId);
   };
 
   const canvasClick = (event: React.MouseEvent<SVGSVGElement>) => {
@@ -360,12 +386,15 @@ export function PlanCanvas({ onMeasuredRectangle }: { onMeasuredRectangle: () =>
             const selected = state.selection?.kind === "wall" && state.selection.id === wall.id;
             const length = wallLength(renderProject, wall);
             const middle = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+            const pivot = state.wallAnchor === "start" ? start : state.wallAnchor === "end" ? end : middle;
             let normal = { x: -((end.y - start.y) / length) * 13_000, y: ((end.x - start.x) / length) * 13_000 };
             if (roomCenter) {
               const toward = Math.hypot(middle.x + normal.x - roomCenter.x, middle.y + normal.y - roomCenter.y);
               const away = Math.hypot(middle.x - normal.x - roomCenter.x, middle.y - normal.y - roomCenter.y);
               if (toward < away) normal = { x: -normal.x, y: -normal.y };
             }
+            const rotationHandle = { x: pivot.x + normal.x * 2.4, y: pivot.y + normal.y * 2.4 };
+            const orientationDegrees = Math.round((Math.atan2(end.y - start.y, end.x - start.x) * 180) / Math.PI);
             return (
               <g key={wall.id} className={(selected ? "selected " : "") + (dragCollision === "wall" ? "blocking" : "")}>
                 <line x1={start.x} y1={start.y} x2={end.x} y2={end.y} className="wall-hit" onClick={(event) => {
@@ -382,6 +411,20 @@ export function PlanCanvas({ onMeasuredRectangle }: { onMeasuredRectangle: () =>
                     r={handleRadius}
                     className="anchor-marker"
                   />
+                  <line x1={pivot.x} y1={pivot.y} x2={rotationHandle.x} y2={rotationHandle.y} className="transform-guide" />
+                  <circle
+                    cx={rotationHandle.x}
+                    cy={rotationHandle.y}
+                    r={handleRadius}
+                    className="transform-handle rotation-handle"
+                    aria-label="Rotate wall"
+                    onPointerDown={(event) => {
+                      event.stopPropagation();
+                      svgRef.current?.setPointerCapture(event.pointerId);
+                      setWallRotation({ id: wall.id, orientationDegrees });
+                    }}
+                    onClick={(event) => event.stopPropagation()}
+                  />
                   <DimensionRail wall={wall} midpoint={middle} normal={normal} />
                   {[start, end].map((vertex) => (
                     <circle
@@ -396,6 +439,7 @@ export function PlanCanvas({ onMeasuredRectangle }: { onMeasuredRectangle: () =>
                         svgRef.current?.setPointerCapture(event.pointerId);
                         setVertexDrag({ id: vertex.id, point: { x: vertex.x, y: vertex.y } });
                       }}
+                      onClick={(event) => event.stopPropagation()}
                     />
                   ))}
                 </>}

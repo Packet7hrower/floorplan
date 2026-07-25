@@ -5,6 +5,7 @@ import {
   furnitureCollision,
   isValidClosedRoom,
   projectBounds,
+  reorientWallVertices,
   resizeWallVertices,
   validateOpeningPlacement,
   wallLength,
@@ -74,6 +75,7 @@ interface ProjectState {
   updateProject: (patch: Partial<Pick<FloorplanProjectV1, "name" | "displayUnit">>) => void;
   updateSettings: (patch: Partial<FloorplanProjectV1["settings"]>) => void;
   resizeWall: (wallId: string, length: LengthMils, anchor: WallAnchor) => void;
+  setWallOrientation: (wallId: string, orientationDegrees: number, anchor: WallAnchor) => void;
   updateOpening: (id: string, patch: Partial<Opening>) => void;
   updateFurniture: (id: string, patch: Partial<FurnitureInstance>) => void;
   moveFurnitureClamped: (id: string, target: Point) => void;
@@ -366,6 +368,24 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const issue = mutationIsValid(next);
     if (issue) set({ error: issue });
     else commit(set, state, next, "Wall length updated.");
+  },
+  setWallOrientation: (wallId, orientationDegrees, anchor) => {
+    const state = get();
+    const next = clone(state.project);
+    const wall = next.walls.find((item) => item.id === wallId);
+    if (!wall) return;
+    try {
+      const [start, end] = wallVertices(next, wall);
+      const [newStart, newEnd] = reorientWallVertices(start, end, orientationDegrees, anchor);
+      Object.assign(start, { x: Math.round(newStart.x), y: Math.round(newStart.y) });
+      Object.assign(end, { x: Math.round(newEnd.x), y: Math.round(newEnd.y) });
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : "Wall orientation is invalid." });
+      return;
+    }
+    const issue = mutationIsValid(next);
+    if (issue) set({ error: issue });
+    else commit(set, state, next, "Wall orientation updated.");
   },
   updateOpening: (id, patch) => {
     const state = get();

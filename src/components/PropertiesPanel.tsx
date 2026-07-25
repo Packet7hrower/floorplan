@@ -2,7 +2,7 @@ import { Box, Copy, Files, Info, PanelRightClose, RotateCw, X } from "lucide-rea
 import { useEffect, useMemo, useState } from "react";
 import { FURNITURE_CATALOG } from "../domain/defaults";
 import { formatArea, formatMeasurement, parseMeasurement } from "../domain/measurements";
-import { obstructedDoorIds, orderedRoomVertices, polygonSignedArea, wallLength } from "../domain/geometry";
+import { obstructedDoorIds, orderedRoomVertices, polygonSignedArea, wallLength, wallVertices } from "../domain/geometry";
 import type { LengthMils, Unit } from "../domain/types";
 import { useProjectStore } from "../store/projectStore";
 import { useUiStore } from "../store/uiStore";
@@ -87,6 +87,10 @@ export function PropertiesPanel({ roomReady }: PropertiesPanelProps) {
   });
   const roomWidth = state.project.vertices.length ? Math.round(Math.max(...state.project.vertices.map((vertex) => vertex.x)) - Math.min(...state.project.vertices.map((vertex) => vertex.x))) : 0;
   const roomDepth = state.project.vertices.length ? Math.round(Math.max(...state.project.vertices.map((vertex) => vertex.y)) - Math.min(...state.project.vertices.map((vertex) => vertex.y))) : 0;
+  const wallOrientation = selectedWall ? Math.round((() => {
+    const [start, end] = wallVertices(state.project, selectedWall);
+    return (Math.atan2(end.y - start.y, end.x - start.x) * 180) / Math.PI;
+  })()) : 0;
   const breadcrumb = selectedWall
     ? `Project / Wall ${state.project.walls.findIndex((item) => item.id === selectedWall.id) + 1}`
     : selectedOpening
@@ -108,6 +112,7 @@ export function PropertiesPanel({ roomReady }: PropertiesPanelProps) {
         <>
           <div className="property-title"><div><p className="eyebrow">Wall</p><h2>Wall segment</h2></div><span className="selection-chip">Selected</span></div>
           <MeasurementField label="Length" value={Math.round(wallLength(state.project, selectedWall))} unit={state.project.displayUnit} onCommit={(value) => state.resizeWall(selectedWall.id, value, state.wallAnchor)} />
+          <label className="field"><span>Orientation</span><div className="input-suffix"><input aria-label="Wall orientation" type="number" min="-360" max="360" step="1" value={wallOrientation} onChange={(event) => state.setWallOrientation(selectedWall.id, Number(event.target.value), state.wallAnchor)} /><span>°</span></div><small>Drag the rotation handle on the selected wall, or enter an exact angle. Shift snaps to 45° while dragging.</small></label>
           <fieldset className="anchor-fieldset">
             <legend>Anchor</legend>
             <div className="segmented-control stretch">

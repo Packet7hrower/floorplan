@@ -1,6 +1,6 @@
 # Project State
 
-Updated: 2026-07-25 16:56 CDT (America/Chicago)
+Updated: 2026-07-25 17:47 CDT (America/Chicago)
 
 ## Current objective
 
@@ -13,7 +13,8 @@ The approved `UX_DEVELOPMENT_PLAN.md` software roadmap is implemented across sta
 - First use now includes measured rectangle entry, contextual next actions, a dismissible workflow rail, active-tool guidance, Help, and an explicit local-protection/download state.
 - Precision editing now includes zoom-stable handles, spatial dimensions, opening/furniture nudging, copy/paste/duplicate/rotate, furniture X/Y fields, snap preferences, and collision-aware inline feedback.
 - Workspace state is locally persisted outside project JSON; rails are collapsible/resizable, furniture is searchable and categorized with favorites/recents, selection context is explicit, and 3D replaces drawing tools with scene controls.
-- IndexedDB now provides a thumbnail project library and named recovery snapshots; imports are diagnosed before the active project is replaced, and secure-context direct file save progressively enhances the universal download path.
+- IndexedDB now provides a thumbnail project library and named recovery snapshots; automatic recovery falls back to browser localStorage when IndexedDB is blocked or fails to write. Imports are diagnosed before the active project is replaced, and secure-context direct file save progressively enhances the universal download path.
+- A selected wall can now be reoriented without rebuilding the room: a canvas rotation handle and exact angle field rotate its existing connected vertices around the selected Start, Center, or End anchor. Openings remain hosted on that wall, and room/collision validation rejects invalid geometry rather than deleting content.
 - 3D now provides camera presets, frame selection, synchronized object selection, per-project-session camera state, wall transparency, optional selection labels/dimensions, and direct return to authoritative 2D editing.
 - The main startup bundle fell from approximately 1.70 MB to 366.93 KB minified; 3D and export are isolated in deferred 889.85 KB and 475.14 KB chunks.
 - The Swiss drafting system remains the visual direction and the spatial dimension rail is now the signature precision-editing surface.
@@ -41,7 +42,7 @@ The approved `UX_DEVELOPMENT_PLAN.md` software roadmap is implemented across sta
 
 ## Current local implementation evidence
 
-- `npm run check`: pass; ESLint with zero warnings, 52 of 52 Vitest tests, TypeScript, and the production Vite build.
+- `npm run check`: pass; ESLint with zero warnings, 55 of 55 Vitest tests, TypeScript, and the production Vite build.
 - `npm run test:e2e`: 33 of 33 pass across Chromium, Firefox, and WebKit.
 - Accessibility: first-run and populated states retain zero critical or serious automated WCAG A/AA violations in all three engines.
 - Plain-HTTP compatibility: all three engines pass startup, sample creation, and IndexedDB recovery while native `crypto.randomUUID` and `crypto.subtle` are deliberately unavailable.

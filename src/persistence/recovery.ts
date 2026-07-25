@@ -7,6 +7,8 @@ const SNAPSHOT_STORE = "snapshots";
 const PROJECT_STORE = "projects";
 const VERSION = 2;
 const MAX_SNAPSHOTS = 3;
+const FALLBACK_SNAPSHOT_KEY = "floorplan-recovery-fallback-snapshots";
+let fallbackIdSequence = 0;
 
 export interface RecoverySnapshot {
   id: string;
@@ -48,10 +50,41 @@ function waitForTransaction(transaction: IDBTransaction): Promise<void> {
   });
 }
 
+function readFallbackSnapshots(): RecoverySnapshot[] {
+  try {
+    const value = globalThis.localStorage?.getItem(FALLBACK_SNAPSHOT_KEY);
+    if (!value) return [];
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((snapshot): snapshot is RecoverySnapshot => Boolean(snapshot && typeof snapshot === "object" && "id" in snapshot && "timestamp" in snapshot && "projectJson" in snapshot && "checksum" in snapshot && "schemaVersion" in snapshot)) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeFallbackSnapshots(snapshots: RecoverySnapshot[]): void {
+  globalThis.localStorage?.setItem(FALLBACK_SNAPSHOT_KEY, JSON.stringify(snapshots));
+}
+
+function saveFallbackSnapshot(snapshot: RecoverySnapshot): void {
+  const snapshots = [snapshot, ...readFallbackSnapshots().filter((item) => item.id !== snapshot.id)]
+    .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+    .slice(0, MAX_SNAPSHOTS);
+  writeFallbackSnapshots(snapshots);
+}
+
+function generateSnapshotId(): string {
+  try {
+    return generateUuid();
+  } catch {
+    fallbackIdSequence += 1;
+    return `recovery-${Date.now().toString(36)}-${fallbackIdSequence.toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+}
+
 export async function makeSnapshot(project: FloorplanProjectV1, label?: string, kind: "automatic" | "named" = "automatic"): Promise<RecoverySnapshot> {
   const projectJson = serializeProject(project);
   return {
-    id: generateUuid(),
+    id: generateSnapshotId(),
     timestamp: new Date().toISOString(),
     schemaVersion: 1,
     checksum: await sha256(projectJson),
@@ -69,9 +102,10 @@ export function chooseSnapshotIdsToPrune(snapshots: RecoverySnapshot[], limit = 
 }
 
 export async function writeRecoverySnapshot(project: FloorplanProjectV1, label?: string, kind: "automatic" | "named" = "automatic"): Promise<void> {
-  const database = await openDatabase();
+  const snapshot = await makeSnapshot(project, label, kind);
+  let database: IDBDatabase | undefined;
   try {
-    const snapshot = await makeSnapshot(project, label, kind);
+    database = await openDatabase();
     const write = database.transaction(SNAPSHOT_STORE, "readwrite");
     write.objectStore(SNAPSHOT_STORE).put(snapshot);
     await waitForTransaction(write);
@@ -82,14 +116,19 @@ export async function writeRecoverySnapshot(project: FloorplanProjectV1, label?:
       staleIds.forEach((id) => prune.objectStore(SNAPSHOT_STORE).delete(id));
       await waitForTransaction(prune);
     }
+  } catch (error) {
+    try {
+      saveFallbackSnapshot(snapshot);
+    } catch {
+      throw error;
+    }
   } finally {
-    database.close();
+    database?.close();
   }
 }
 
 export async function listRecoverySnapshots(database?: IDBDatabase): Promise<RecoverySnapshot[]> {
-  const owner = database ?? await openDatabase();
-  try {
+  const read = async (owner: IDBDatabase): Promise<RecoverySnapshot[]> => {
     const transaction = owner.transaction(SNAPSHOT_STORE, "readonly");
     const request = transaction.objectStore(SNAPSHOT_STORE).getAll();
     const snapshots = await new Promise<RecoverySnapshot[]>((resolve, reject) => {
@@ -97,19 +136,44 @@ export async function listRecoverySnapshots(database?: IDBDatabase): Promise<Rec
       request.onerror = () => reject(request.error ?? new Error("Recovery snapshots could not be read."));
     });
     return snapshots.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-  } finally {
-    if (!database) owner.close();
+  };
+  if (database) return read(database);
+  try {
+    const owner = await openDatabase();
+    try {
+      const snapshots = await read(owner);
+      const merged = new Map(snapshots.map((snapshot) => [snapshot.id, snapshot]));
+      readFallbackSnapshots().forEach((snapshot) => merged.set(snapshot.id, snapshot));
+      return [...merged.values()].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    } finally {
+      owner.close();
+    }
+  } catch {
+    return readFallbackSnapshots().sort((a, b) => b.timestamp.localeCompare(a.timestamp));
   }
 }
 
 export async function deleteRecoverySnapshot(id: string): Promise<void> {
-  const database = await openDatabase();
+  let database: IDBDatabase | undefined;
   try {
+    database = await openDatabase();
     const transaction = database.transaction(SNAPSHOT_STORE, "readwrite");
     transaction.objectStore(SNAPSHOT_STORE).delete(id);
     await waitForTransaction(transaction);
+  } catch (error) {
+    try {
+      writeFallbackSnapshots(readFallbackSnapshots().filter((snapshot) => snapshot.id !== id));
+      return;
+    } catch {
+      throw error;
+    }
   } finally {
-    database.close();
+    database?.close();
+  }
+  try {
+    writeFallbackSnapshots(readFallbackSnapshots().filter((snapshot) => snapshot.id !== id));
+  } catch {
+    // A blocked fallback store must not prevent a successful IndexedDB deletion.
   }
 }
 

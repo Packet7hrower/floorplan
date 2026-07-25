@@ -9,6 +9,7 @@ import {
   obstructedDoorIds,
   polygonSignedArea,
   polygonsOverlap,
+  reorientWallVertices,
   resizeWallVertices,
   validateOpeningPlacement,
 } from "../src/domain/geometry";
@@ -34,6 +35,19 @@ describe("room polygon geometry", () => {
     expect(resizeWallVertices({ x: 0, y: 0 }, { x: 10, y: 0 }, 20, "start")).toEqual([{ x: 0, y: 0 }, { x: 20, y: 0 }]);
     expect(resizeWallVertices({ x: 0, y: 0 }, { x: 10, y: 0 }, 20, "end")).toEqual([{ x: -10, y: 0 }, { x: 10, y: 0 }]);
     expect(resizeWallVertices({ x: 0, y: 0 }, { x: 10, y: 0 }, 20, "center")).toEqual([{ x: -5, y: 0 }, { x: 15, y: 0 }]);
+  });
+
+  it("reorients a wall around the selected anchor without changing its length", () => {
+    const [startFixed, startMoved] = reorientWallVertices({ x: 0, y: 0 }, { x: 10, y: 0 }, 90, "start");
+    expect(startFixed).toEqual({ x: 0, y: 0 });
+    expect(startMoved.x).toBeCloseTo(0);
+    expect(startMoved.y).toBeCloseTo(10);
+    const [endMoved, endFixed] = reorientWallVertices({ x: 0, y: 0 }, { x: 10, y: 0 }, 90, "end");
+    expect(endMoved.x).toBeCloseTo(10);
+    expect(endMoved.y).toBeCloseTo(-10);
+    expect(endFixed).toEqual({ x: 10, y: 0 });
+    expect(reorientWallVertices({ x: 0, y: 0 }, { x: 10, y: 0 }, 90, "center")[0].x).toBeCloseTo(5);
+    expect(reorientWallVertices({ x: 0, y: 0 }, { x: 10, y: 0 }, 90, "center")[1].y).toBeCloseTo(5);
   });
 });
 

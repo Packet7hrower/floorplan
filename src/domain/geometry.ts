@@ -144,6 +144,26 @@ export function resizeWallVertices(start: Point, end: Point, newLength: number, 
   ];
 }
 
+/**
+ * Keep a wall's length and its chosen anchor fixed while setting its absolute
+ * orientation.  The wall continues to reference the same vertices, so the
+ * surrounding room topology and wall-hosted openings remain intact.
+ */
+export function reorientWallVertices(start: Point, end: Point, orientationDegrees: number, anchor: WallAnchor): [Point, Point] {
+  const length = distance(start, end);
+  if (length < EPSILON || !Number.isFinite(orientationDegrees)) throw new Error("Wall orientation must be a finite angle.");
+  const radians = (orientationDegrees * Math.PI) / 180;
+  const direction = { x: Math.cos(radians), y: Math.sin(radians) };
+  if (anchor === "start") return [start, { x: start.x + direction.x * length, y: start.y + direction.y * length }];
+  if (anchor === "end") return [{ x: end.x - direction.x * length, y: end.y - direction.y * length }, end];
+  const midpoint = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+  const half = length / 2;
+  return [
+    { x: midpoint.x - direction.x * half, y: midpoint.y - direction.y * half },
+    { x: midpoint.x + direction.x * half, y: midpoint.y + direction.y * half },
+  ];
+}
+
 export function rotatePoint(point: Point, center: Point, degrees: number): Point {
   const radians = (degrees * Math.PI) / 180;
   const cos = Math.cos(radians);
